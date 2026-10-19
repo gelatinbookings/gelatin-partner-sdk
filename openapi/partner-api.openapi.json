@@ -525,7 +525,8 @@
           "500": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "description": "Requires bookings:read. Mounted. Resolves the event only through the authenticated partner's own external_event_id; an unknown event and another partner's event both return the same 404. Each request reports authorization_required until a signed hold exists on its current offer; requested while the DJ considers a held offer, including acceptance awaiting a signed capture; reauthorization_required when the DJ countered or the offer changed: a counteroffer releases the earlier hold, so the organizer must approve the new total and place a new hold; negotiating is reserved for a counter open while a hold is still valid, which the current flow does not produce; confirmed only after Gelatin records the signed capture; and declined, expired or cancelled when it ends. The actions array is currently always empty: portal links are single-use, so mint one with the portal launch route when the organizer acts rather than on each read. revision stays 0 until event change submission is mounted; use the ETag for change detection. ETag and If-None-Match return 304 with no body. Responses use Cache-Control: private, no-store."
       }
     },
     "/v1/partners/{partner}/events/{external_event_id}": {
