@@ -1,0 +1,1821 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Gelatin Partner DJ Booking API",
+    "version": "0.1.0-alpha.1",
+    "description": "Partner-scoped HTTP API for listing Gelatin DJs, submitting booking requests, handing organizers to Gelatin's hosted booking page, and reading booking status. Pre-release: the contract may change before 1.0."
+  },
+  "x-contract-status": "pre-release",
+  "servers": [
+    {
+      "url": "https://staging.gelatinbookings.com",
+      "description": "Sandbox (Stripe test mode, gel_test_ keys)"
+    }
+  ],
+  "security": [
+    {
+      "PartnerBearer": []
+    }
+  ],
+  "paths": {
+    "/v1/partners/{partner}/djs": {
+      "get": {
+        "summary": "Read approved DJs and advisory availability",
+        "operationId": "listPartnerDjs",
+        "security": [
+          {
+            "PartnerBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "partner",
+            "in": "path",
+            "required": true,
+            "description": "Partner slug; the bearer key must be scoped to this same partner.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "city",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact case-insensitive city match; surrounding whitespace is ignored."
+          },
+          {
+            "name": "date",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "Calendar date for advisory availability. When omitted, available is false."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque keyset position bound to the authenticated partner and city/date filters. Eligibility is checked again on every page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current partner-safe projection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DjCatalogPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Requires catalog:read. Only active DJs approved by partner distribution settings, with partner exclusions taking precedence. Only published partner-allowlisted fields; hidden rates stay null. Availability requires a date, payout readiness and no known date conflict; rechecked at each mutation. Unknown or duplicate query parameters are rejected. Responses use Cache-Control: private, no-store."
+      }
+    },
+    "/v1/partners/{partner}/dj-request-submissions": {
+      "post": {
+        "summary": "Create one partner booking with one or more DJ engagements",
+        "operationId": "submitDjRequests",
+        "security": [
+          {
+            "PartnerBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "partner",
+            "in": "path",
+            "required": true,
+            "description": "Partner slug; the bearer key must be scoped to this same partner.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Stable key for one logical write. Same key and body return the original result; a changed body returns 409.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DjRequestSubmission"
+              },
+              "examples": {
+                "portal": {
+                  "value": {
+                    "external_event_id": "event_123",
+                    "external_submission_id": "submission_123",
+                    "organizer": {
+                      "external_user_id": "user_789",
+                      "email": "organizer@example.com",
+                      "email_verified": true,
+                      "display_name": "Taylor Smith"
+                    },
+                    "event": {
+                      "name": "Friday Night",
+                      "starts_at": "2026-11-14T21:00:00-05:00",
+                      "ends_at": "2026-11-14T23:00:00-05:00",
+                      "time_zone": "America/New_York",
+                      "venue_name": "Example Room"
+                    },
+                    "requests": [
+                      {
+                        "external_request_id": "request_001",
+                        "dj_id": "dj_456",
+                        "initial_offer": {
+                          "currency": "usd",
+                          "dj_fee_cents": 50000,
+                          "note": "Two-hour set"
+                        }
+                      },
+                      {
+                        "external_request_id": "request_002",
+                        "dj_id": "dj_789",
+                        "initial_offer": {
+                          "currency": "usd",
+                          "dj_fee_cents": 75000,
+                          "note": "Closing set"
+                        }
+                      }
+                    ],
+                    "authorization_placement": "gelatin_portal_handoff",
+                    "return_url": "https://partner.example.com/events/event_123",
+                    "external_booking_id": "booking_123"
+                  }
+                },
+                "inFlow": {
+                  "value": {
+                    "external_event_id": "event_123",
+                    "external_submission_id": "submission_124",
+                    "organizer": {
+                      "external_user_id": "user_789",
+                      "email": "organizer@example.com"
+                    },
+                    "event": {
+                      "name": "Friday Night",
+                      "starts_at": "2026-11-14T21:00:00-05:00",
+                      "ends_at": "2026-11-14T23:00:00-05:00",
+                      "time_zone": "America/New_York",
+                      "venue_name": "Example Room"
+                    },
+                    "requests": [
+                      {
+                        "external_request_id": "request_002",
+                        "dj_id": "dj_456",
+                        "initial_offer": {
+                          "currency": "usd",
+                          "dj_fee_cents": 50000
+                        }
+                      }
+                    ],
+                    "authorization_placement": "partner_event_flow",
+                    "return_url": "https://partner.example.com/events/event_123",
+                    "external_booking_id": "booking_124"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Accepted current result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmissionResult"
+                },
+                "examples": {
+                  "portal": {
+                    "value": {
+                      "submission_id": "sub_01J",
+                      "requests": [
+                        {
+                          "request_id": "req_01J",
+                          "dj_id": "dj_456",
+                          "status": "authorization_required",
+                          "offer_revision": 1,
+                          "amount": {
+                            "currency": "usd",
+                            "total_cents": 56500
+                          },
+                          "authorization": {
+                            "kind": "portal",
+                            "url": "https://bookings.example.test/launch/opaque-single-use-code",
+                            "expires_at": "2026-10-12T18:00:00Z"
+                          },
+                          "portal_url": "https://bookings.example.test/requests/req_01J"
+                        },
+                        {
+                          "request_id": "req_02J",
+                          "dj_id": "dj_789",
+                          "status": "authorization_required",
+                          "offer_revision": 1,
+                          "amount": {
+                            "currency": "usd",
+                            "total_cents": 75700
+                          },
+                          "authorization": {
+                            "kind": "portal",
+                            "url": "https://bookings.example.test/launch/second-opaque-code",
+                            "expires_at": "2026-10-12T18:00:00Z"
+                          },
+                          "portal_url": "https://bookings.example.test/requests/req_02J"
+                        }
+                      ],
+                      "partner_booking_id": "pbk_01J"
+                    }
+                  },
+                  "inFlow": {
+                    "value": {
+                      "submission_id": "sub_01K",
+                      "requests": [
+                        {
+                          "request_id": "req_01K",
+                          "dj_id": "dj_456",
+                          "status": "authorization_required",
+                          "offer_revision": 1,
+                          "amount": {
+                            "currency": "usd",
+                            "total_cents": 56500
+                          },
+                          "authorization": {
+                            "kind": "in_flow",
+                            "bootstrap_url": "https://bookings.example.test/bootstrap/opaque-single-use-code",
+                            "expires_at": "2026-10-12T18:00:00Z"
+                          },
+                          "portal_url": "https://bookings.example.test/requests/req_01K"
+                        }
+                      ],
+                      "partner_booking_id": "pbk_01K"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "`conflict`: the idempotency key or an external request was reused with different terms. `dj_unavailable`: a selected DJ cannot take this event; nothing was created and the whole submission rolled back. Offer another DJ or change the schedule, then submit with a new idempotency key. `503 temporarily_unavailable` is reserved for outages.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "examples": {
+                  "djUnavailable": {
+                    "value": {
+                      "error": {
+                        "code": "dj_unavailable",
+                        "message": "A selected DJ is not available for this event.",
+                        "request_id": "trace_01J",
+                        "external_request_id": "request_002"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "One stable partner booking groups independently negotiated and payable DJ engagements. Each DJ requires its own authorization; no combined charge or all-or-nothing acceptance."
+      }
+    },
+    "/v1/partners/{partner}/launch-sessions": {
+      "post": {
+        "summary": "Create a single-use portal launch",
+        "operationId": "createLaunchSession",
+        "security": [
+          {
+            "PartnerBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "partner",
+            "in": "path",
+            "required": true,
+            "description": "Partner slug; the bearer key must be scoped to this same partner.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Stable key for one logical write. Same key and body return the original result; a changed body returns 409.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LaunchSessionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Accepted current result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LaunchSessionResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/partners/{partner}/events/{external_event_id}/dj-bookings": {
+      "get": {
+        "summary": "Read customer-safe booking status",
+        "operationId": "getEventBookings",
+        "security": [
+          {
+            "PartnerBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "partner",
+            "in": "path",
+            "required": true,
+            "description": "Partner slug; the bearer key must be scoped to this same partner.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "external_event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current projection",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventBookings"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Unchanged; no response body",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/partners/{partner}/events/{external_event_id}": {
+      "patch": {
+        "summary": "Send a monotonic event change or cancellation",
+        "operationId": "updateEvent",
+        "security": [
+          {
+            "PartnerBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "partner",
+            "in": "path",
+            "required": true,
+            "description": "Partner slug; the bearer key must be scoped to this same partner.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "external_event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Stable key for one logical write. Same key and body return the original result; a changed body returns 409.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventChange"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted current result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventChangeResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/partners/{partner}/events/{external_event_id}/attendance": {
+      "post": {
+        "summary": "Record optional aggregate attendance",
+        "operationId": "recordAttendance",
+        "security": [
+          {
+            "PartnerBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "partner",
+            "in": "path",
+            "required": true,
+            "description": "Partner slug; the bearer key must be scoped to this same partner.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "external_event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Stable key for one logical write. Same key and body return the original result; a changed body returns 409.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttendanceAggregate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted current result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttendanceResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/partners/{partner}/booking-requests": {
+      "post": {
+        "summary": "Submit one partner booking with one or more DJ requests (mounted)",
+        "description": "Requires `requests:write`. Body at most 64 KiB. Only `gelatin_portal_handoff` is accepted; `partner_event_flow` returns 422 `unsupported_authorization_placement`. `return_url` must use an origin Gelatin registered for the partner. The organizer then authorizes payment through a portal launch.",
+        "operationId": "submitBookingRequests",
+        "security": [
+          {
+            "PartnerBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "partner",
+            "in": "path",
+            "required": true,
+            "description": "Partner slug; the bearer key must be scoped to this same partner.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Stable key for one logical write. Same key and body return the original result; a changed body returns 409.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DjRequestSubmission"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created; a same-key retry with the same body returns the original result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookingRequestResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`: the body is not valid JSON, is over 64 KiB, fails the schema (including a `dj_fee_cents` above 100,000,000 or a non-USD currency), uses a return URL outside your registered return origins, or the `Idempotency-Key` header is missing, padded or longer than 255 characters. Field details are never echoed. Fix the request; do not retry it unchanged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "description": "`not_found`: your partner integration is switched off. Contact Gelatin; retrying will not help.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Permanent; do not retry unchanged. `dj_unavailable` (with `external_request_id`): that request's DJ is unknown, inactive, already booked, blacked out, excluded from your catalog or not yet payable. Nothing was created and the whole submission rolled back; offer another DJ or change the schedule, then submit with a new idempotency key. `conflict`: the idempotency key was reused with a different body, the `external_booking_id` was already submitted with different terms or belongs to another event or organizer, an `external_request_id` already belongs to another booking or DJ, or the `external_event_id` belongs to another organizer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "examples": {
+                  "djUnavailable": {
+                    "value": {
+                      "error": {
+                        "code": "dj_unavailable",
+                        "message": "A selected DJ is not available for this event.",
+                        "request_id": "5f0c1d3e-8f4b-4f0a-9b7e-2a3c4d5e6f70",
+                        "external_request_id": "request-2"
+                      }
+                    }
+                  },
+                  "conflict": {
+                    "value": {
+                      "error": {
+                        "code": "conflict",
+                        "message": "This booking request conflicts with an earlier submission.",
+                        "request_id": "5f0c1d3e-8f4b-4f0a-9b7e-2a3c4d5e6f71"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`unsupported_authorization_placement`: only `gelatin_portal_handoff` is available; in-flow payment is not built yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "description": "`temporarily_unavailable` with `Retry-After: 30`: a Gelatin outage. Retry with the same `Idempotency-Key` and the same body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/partners/{partner}/portal-launches": {
+      "post": {
+        "summary": "Create a single-use organizer portal launch for one DJ engagement (mounted)",
+        "description": "Requires `launch:write`. The resource must belong to the same partner, external event and external organizer. The returned URL carries a one-use secret in its fragment and expires after 60 seconds; redirect the organizer immediately and never log it. `return_url` must use a registered return origin.",
+        "operationId": "createPortalLaunch",
+        "security": [
+          {
+            "PartnerBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "partner",
+            "in": "path",
+            "required": true,
+            "description": "Partner slug; the bearer key must be scoped to this same partner.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Stable key for one logical write. Same key and body return the original result; a changed body returns 409.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LaunchSessionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created; a same-key retry with the same body returns the original result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LaunchSessionResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`: the body is invalid or over 2 KiB, has unknown fields, the `return_url` is outside your registered return origins or contains credentials, or the `Idempotency-Key` header is missing, padded or longer than 255 characters.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "description": "`resource_unavailable`: no request or booking with that id belongs to this partner, event and organizer, or it can no longer be opened.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`idempotency_conflict`: this `Idempotency-Key` was already used for a different launch body. Use a new key for a new launch.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "description": "`temporarily_unavailable` with `Retry-After: 30`: retry with the same `Idempotency-Key` and body; you get the same link back.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "PartnerBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "Gelatin partner API key",
+        "description": "Server-side only. Separate scoped sandbox and production keys."
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Narrow error envelope; no raw provider or personal data",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "ApiError": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]*$"
+              },
+              "message": {
+                "type": "string"
+              },
+              "request_id": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "external_request_id": {
+                "description": "Present only on `dj_unavailable`: the partner's `external_request_id` whose DJ cannot take the event. The reason (booked, blacked out, not distributed or not payout-ready) is deliberately not disclosed.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            }
+          }
+        }
+      },
+      "PublicDj": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "city",
+          "tier",
+          "profile_url",
+          "image_url",
+          "draw",
+          "published_rate_cents",
+          "available"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "verified",
+              "top_performer",
+              "resident",
+              "city_pillar"
+            ]
+          },
+          "profile_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "image_url": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "draw": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "min",
+                  "max",
+                  "window"
+                ],
+                "properties": {
+                  "min": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "max": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "window": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "published_rate_cents": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "available": {
+            "type": "boolean",
+            "description": "Advisory only. False without a requested date, payout readiness, or when a known date conflict applies. A true result does not reserve a slot; each paid mutation rechecks eligibility and timing."
+          }
+        }
+      },
+      "DjCatalogPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicDj"
+            }
+          },
+          "next_cursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "Organizer": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "external_user_id",
+          "email"
+        ],
+        "properties": {
+          "external_user_id": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "email_verified": {
+            "type": "boolean"
+          },
+          "display_name": {
+            "type": "string"
+          }
+        }
+      },
+      "EventContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "starts_at",
+          "ends_at",
+          "time_zone",
+          "venue_name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ends_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Must be later than starts_at. The server never invents a DJ engagement duration."
+          },
+          "time_zone": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "An IANA timezone accepted by Gelatin, such as America/New_York."
+          },
+          "venue_name": {
+            "type": "string"
+          }
+        }
+      },
+      "InitialOffer": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "currency",
+          "dj_fee_cents"
+        ],
+        "properties": {
+          "currency": {
+            "type": "string",
+            "pattern": "^[a-z]{3}$"
+          },
+          "dj_fee_cents": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      },
+      "IndependentDjRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "external_request_id",
+          "dj_id",
+          "initial_offer"
+        ],
+        "properties": {
+          "external_request_id": {
+            "type": "string"
+          },
+          "dj_id": {
+            "type": "string"
+          },
+          "initial_offer": {
+            "$ref": "#/components/schemas/InitialOffer"
+          }
+        }
+      },
+      "DjRequestSubmission": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "external_event_id",
+          "external_submission_id",
+          "external_booking_id",
+          "organizer",
+          "event",
+          "requests",
+          "authorization_placement",
+          "return_url"
+        ],
+        "properties": {
+          "external_event_id": {
+            "type": "string"
+          },
+          "external_submission_id": {
+            "type": "string"
+          },
+          "organizer": {
+            "$ref": "#/components/schemas/Organizer"
+          },
+          "event": {
+            "$ref": "#/components/schemas/EventContext"
+          },
+          "requests": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/IndependentDjRequest"
+            },
+            "maxItems": 20
+          },
+          "authorization_placement": {
+            "type": "string",
+            "enum": [
+              "partner_event_flow",
+              "gelatin_portal_handoff"
+            ]
+          },
+          "return_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "external_booking_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Stable partner booking identity; groups one or more independently payable DJ engagements."
+          }
+        }
+      },
+      "MoneyTotal": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "currency",
+          "total_cents"
+        ],
+        "properties": {
+          "currency": {
+            "type": "string",
+            "pattern": "^[a-z]{3}$"
+          },
+          "total_cents": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "PortalAuthorization": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "url",
+          "expires_at"
+        ],
+        "properties": {
+          "kind": {
+            "const": "portal"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "InFlowAuthorization": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "bootstrap_url",
+          "expires_at"
+        ],
+        "properties": {
+          "kind": {
+            "const": "in_flow"
+          },
+          "bootstrap_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AuthorizationAction": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/PortalAuthorization"
+          },
+          {
+            "$ref": "#/components/schemas/InFlowAuthorization"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind"
+        }
+      },
+      "SubmissionRequestResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request_id",
+          "dj_id",
+          "status",
+          "offer_revision",
+          "amount",
+          "authorization",
+          "portal_url"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string"
+          },
+          "dj_id": {
+            "type": "string"
+          },
+          "status": {
+            "const": "authorization_required"
+          },
+          "offer_revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "amount": {
+            "$ref": "#/components/schemas/MoneyTotal"
+          },
+          "authorization": {
+            "$ref": "#/components/schemas/AuthorizationAction"
+          },
+          "portal_url": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      },
+      "SubmissionResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "submission_id",
+          "partner_booking_id",
+          "requests"
+        ],
+        "properties": {
+          "submission_id": {
+            "type": "string"
+          },
+          "requests": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/SubmissionRequestResult"
+            }
+          },
+          "partner_booking_id": {
+            "type": "string",
+            "description": "Gelatin partner booking group ID; not an individual DJ booking or payment ID."
+          }
+        }
+      },
+      "LaunchResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "id"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "request",
+              "booking"
+            ]
+          },
+          "id": {
+            "type": "string"
+          }
+        }
+      },
+      "LaunchSessionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "external_event_id",
+          "external_user_id",
+          "resource",
+          "return_url"
+        ],
+        "properties": {
+          "external_event_id": {
+            "type": "string"
+          },
+          "external_user_id": {
+            "type": "string"
+          },
+          "resource": {
+            "$ref": "#/components/schemas/LaunchResource"
+          },
+          "return_url": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      },
+      "LaunchSessionResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "url",
+          "expires_at"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "StatusAction": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "url"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "authorize",
+              "review_terms",
+              "reauthorize",
+              "view_booking"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      },
+      "BookingStatusProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "external_request_id",
+          "request_id",
+          "dj_id",
+          "status",
+          "offer_revision",
+          "amount",
+          "actions"
+        ],
+        "properties": {
+          "external_request_id": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "dj_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "authorization_required",
+              "requested",
+              "negotiating",
+              "reauthorization_required",
+              "confirmed",
+              "declined",
+              "expired",
+              "cancelled"
+            ]
+          },
+          "offer_revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "amount": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MoneyTotal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatusAction"
+            }
+          }
+        }
+      },
+      "EventBookings": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "external_event_id",
+          "revision",
+          "bookings"
+        ],
+        "properties": {
+          "external_event_id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "bookings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PartnerBookingProjection"
+            }
+          }
+        }
+      },
+      "UpdatedEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "revision",
+          "kind",
+          "event"
+        ],
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "kind": {
+            "const": "updated"
+          },
+          "event": {
+            "$ref": "#/components/schemas/EventContext"
+          }
+        }
+      },
+      "CancelledEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "revision",
+          "kind",
+          "cancelled_at"
+        ],
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "kind": {
+            "const": "cancelled"
+          },
+          "cancelled_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "EventChange": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/UpdatedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/CancelledEvent"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind"
+        }
+      },
+      "EventChangeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "external_event_id",
+          "revision",
+          "status"
+        ],
+        "properties": {
+          "external_event_id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "updated",
+              "cancelled"
+            ]
+          }
+        }
+      },
+      "AttendanceAggregate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "count",
+          "source",
+          "recorded_at"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "source": {
+            "type": "string"
+          },
+          "recorded_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AttendanceResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "external_event_id",
+          "recorded"
+        ],
+        "properties": {
+          "external_event_id": {
+            "type": "string"
+          },
+          "recorded": {
+            "const": true
+          }
+        }
+      },
+      "PartnerBookingProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "partner_booking_id",
+          "external_booking_id",
+          "requests"
+        ],
+        "properties": {
+          "partner_booking_id": {
+            "type": "string"
+          },
+          "external_booking_id": {
+            "type": "string"
+          },
+          "requests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BookingStatusProjection"
+            }
+          }
+        }
+      },
+      "BookingRequestEngagement": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "external_request_id",
+          "dj_id",
+          "request_id",
+          "booking_id",
+          "offer_id",
+          "revision",
+          "total_cents",
+          "currency"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Engagement ID; one per DJ."
+          },
+          "external_request_id": {
+            "type": "string"
+          },
+          "dj_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Pass as a portal launch resource of kind `request`."
+          },
+          "booking_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Pass as a portal launch resource of kind `booking`."
+          },
+          "offer_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "total_cents": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Server-calculated organizer total."
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[a-z]{3}$"
+          }
+        }
+      },
+      "BookingRequestResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "group_id",
+          "event_id",
+          "engagements"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "engagements": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/BookingRequestEngagement"
+            }
+          }
+        }
+      }
+    }
+  }
+}
