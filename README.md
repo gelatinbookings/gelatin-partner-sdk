@@ -9,6 +9,25 @@ A small, typed TypeScript client for Gelatin's partner booking API. With it, you
 
 > **Pre-release (`0.1.0-alpha`).** The contract may change before 1.0. Pin to a tag.
 
+## What this is, in plain words
+
+Gelatin books DJs for events. A **partner** is a company with its own events website that wants its organizers to book Gelatin DJs. The journey has five steps:
+
+1. Your website shows a list of Gelatin DJs.
+2. The organizer picks DJs and suggests a fee. Your server sends that to Gelatin as a booking request.
+3. Your website sends the organizer to a **Gelatin booking page** with your logo on it. There they review the offer, negotiate if the DJ counters, and place a card hold. No money moves yet.
+4. The organizer comes back to your website.
+5. When the DJ accepts, Gelatin takes the payment. Your server asks Gelatin for each booking's status whenever it wants to show it.
+
+This package is the code your **server** uses to talk to Gelatin. It saves you writing the web requests by hand. A few terms:
+
+- **Server vs browser:** your server is the computer running your backend code. The browser is the organizer's screen. The API key must only ever be on your server.
+- **API key:** a long secret password Gelatin issues, starting `gel_test_` (sandbox) or `gel_live_` (live). Keep it in your server's environment settings, never in code or the browser.
+- **Sandbox:** Gelatin's practice environment with fake money (Stripe test mode). Build and test there first.
+- **Idempotency key:** a label on each write, so that if a request is sent twice (say, after a network blip), Gelatin does it only once. This package sets these for you.
+
+Not using JavaScript? Every call is a plain HTTPS request with JSON, described in the OpenAPI file, so any language works.
+
 ## Install
 
 ```sh
