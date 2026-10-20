@@ -97,6 +97,8 @@ const status = await gelatin.getEventBookings("event_123");
 
 A runnable version is in [`examples/quickstart.ts`](examples/quickstart.ts).
 
+For a complete website, see the [Next.js partner example](examples/nextjs/README.md): a small events site you can run against the sandbox and click through the whole journey, including payment, the DJ's reply and live status.
+
 Gelatin never calls your server. Status is pull-only: read it when the organizer comes back, when they open the event, or on a schedule. Pass `{ ifNoneMatch: lastEtag }` to skip unchanged reads: the result is `{ modified: false }` until something changes, then `{ modified: true, etag, data }`.
 
 ## Idempotency and retries
