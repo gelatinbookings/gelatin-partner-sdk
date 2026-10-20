@@ -3,6 +3,7 @@ import type { DemoBooking } from "../lib/cookies";
 import { describeStatus } from "../lib/status";
 import type { PartnerBookingStatus } from "@gelatinbookings/partner-sdk/types";
 import LaunchButton from "./launch-button";
+import PayButton from "./pay-button";
 
 function money(cents: number, currency: string) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: currency.toUpperCase() }).format(cents / 100);
@@ -39,7 +40,8 @@ export default function BookingList({ bookings, highlight, statuses = {} }: { bo
                 return (
                   <span className="stack" style={{ gap: 6, alignItems: "flex-end" }}>
                     {status.label && <span className={`tag${status.tone === "ok" ? " tag-ok" : status.tone === "no" ? " tag-no" : ""}`}>{status.label}</span>}
-                    {status.action && <LaunchButton eventId={booking.eventId} requestId={engagement.requestId} djName={engagement.djName} label={status.action} />}
+                    {status.via === "page" && <PayButton eventId={booking.eventId} requestId={engagement.requestId} djName={engagement.djName} />}
+                    {status.via === "gelatin" && status.action && <LaunchButton eventId={booking.eventId} requestId={engagement.requestId} djName={engagement.djName} label={status.action} />}
                   </span>
                 );
               })()}

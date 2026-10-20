@@ -17,10 +17,10 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
         <div>
           <p className="eyebrow">Step 3 of 3</p>
           <h1>Bookings sent to Gelatin</h1>
-          <p className="subtle">Each DJ is a separate offer. Open one in Gelatin to review it and place the card hold.</p>
+          <p className="subtle">Each DJ is a separate offer. Pay for each one here; if a DJ comes back with a new price, you review it in Gelatin.</p>
         </div>
       </div>
-      {highlight && <p className="notice notice-ok" role="status" style={{ marginBottom: 16 }}>Gelatin received your request. Authorize payment for each DJ below.</p>}
+      {highlight && <p className="notice notice-ok" role="status" style={{ marginBottom: 16 }}>Gelatin received your request. Pay for each DJ below to send it to them.</p>}
       <BookingList bookings={bookings} highlight={highlight} statuses={statuses} />
       <p className="hint" style={{ marginTop: 12 }}>This list lives in a signed cookie in this browser only. Gelatin keeps the real booking status.</p>
     </main>

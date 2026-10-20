@@ -4,6 +4,7 @@ import { DemoConfigError, readDemoConfig, type DemoConfig } from "./config";
 import {
   clearCookies, cookieNames, hasValidSession, issueSession, readBookings, readCookie, writeBookings, type DemoBooking,
 } from "./cookies";
+import { PartnerApiError } from "@gelatinbookings/partner-sdk/server";
 import { approvedLaunchUrl, describeGelatinError, gelatinClient, type GelatinClient } from "./gelatin";
 import { sameSecret } from "./signed";
 import { buildSubmission, demoBookingFormSchema } from "./submission";
@@ -161,6 +162,55 @@ export function createLaunchPost(deps: HandlerDeps) {
       }
       return json({ url });
     } catch (error) {
+      const described = describeGelatinError(error);
+      return json({ error: described.message, request_id: described.requestId }, described.status);
+    }
+  };
+}
+
+const paymentSessionShape = z.object({
+  // URL-encoded by Stripe, so `%` appears.
+  client_secret: z.string().max(1000).regex(/^cs_test_[A-Za-z0-9_%]+$/),
+  // Staging only: a live key would mean live money.
+  publishable_key: z.string().max(500).regex(/^pk_test_[A-Za-z0-9]+$/),
+});
+
+/**
+ * Start (or resume) the card hold for one DJ on this page. The client secret
+ * opens only that Stripe checkout, so it goes to this organizer's browser and
+ * nowhere else. Paying here doesn't confirm anything by itself: the bookings
+ * page reads the status Gelatin records once Stripe confirms the hold.
+ */
+export function createPaymentPost(deps: HandlerDeps) {
+  return async (request: Request) => {
+    const config = loadConfig(deps);
+    if (config instanceof Response) return config;
+    if (!sameOrigin(request, config)) return json({ error: "Forbidden" }, 403);
+    if (!authorized(request, config)) return json({ error: "Sign in again." }, 401);
+
+    let input: z.infer<typeof launchSchema>;
+    try { input = launchSchema.parse(await readJson(request)); } catch { return json({ error: "Invalid payment request." }, 400); }
+    const booking = readBookings(config, readCookie(request.headers.get("cookie"), cookieNames(config).bookings))
+      .find((item) => item.eventId === input.event_id);
+    if (!booking || !booking.engagements.some((engagement) => engagement.requestId === input.request_id)) {
+      return json({ error: "That booking is not in this browser's list." }, 404);
+    }
+
+    try {
+      const session = await deps.client(config).createPaymentSession({
+        external_event_id: booking.eventId,
+        external_user_id: booking.organizerId,
+        resource: { kind: "request", id: input.request_id },
+      });
+      const checked = paymentSessionShape.safeParse(session);
+      if (!checked.success) {
+        console.error("Refused a Gelatin payment session that is not a test-mode embedded checkout");
+        return json({ error: "Gelatin returned an unexpected payment session." }, 502);
+      }
+      return json({ client_secret: checked.data.client_secret, publishable_key: checked.data.publishable_key });
+    } catch (error) {
+      // A DJ's counteroffer, or a hold started elsewhere, is finished in Gelatin.
+      if (error instanceof PartnerApiError && error.code === "portal_required") return json({ portal: true }, 409);
       const described = describeGelatinError(error);
       return json({ error: described.message, request_id: described.requestId }, described.status);
     }

@@ -20,18 +20,21 @@ export async function readRequestStatuses(gelatin: StatusReader, bookings: DemoB
   return statuses;
 }
 
-const LABELS: Record<PartnerBookingStatus, { label: string; tone: "ok" | "wait" | "no"; action: string | null }> = {
-  authorization_required: { label: "Payment needed", tone: "wait", action: "Review and pay in Gelatin" },
-  reauthorization_required: { label: "New offer from the DJ", tone: "wait", action: "Review the new offer in Gelatin" },
-  requested: { label: "Card held · waiting for the DJ", tone: "wait", action: null },
-  negotiating: { label: "Negotiating", tone: "wait", action: null },
-  confirmed: { label: "Confirmed", tone: "ok", action: null },
-  declined: { label: "Declined by the DJ", tone: "no", action: null },
-  expired: { label: "Expired", tone: "no", action: null },
-  cancelled: { label: "Cancelled", tone: "no", action: null },
+type Described = { label: string | null; tone: "ok" | "wait" | "no"; action: string | null; via: "page" | "gelatin" | null };
+
+const LABELS: Record<PartnerBookingStatus, Described> = {
+  // The first card hold is taken right here, in Stripe's embedded checkout.
+  authorization_required: { label: "Payment needed", tone: "wait", action: "Pay now", via: "page" },
+  reauthorization_required: { label: "New offer from the DJ", tone: "wait", action: "Review the new offer in Gelatin", via: "gelatin" },
+  requested: { label: "Card held · waiting for the DJ", tone: "wait", action: null, via: null },
+  negotiating: { label: "Negotiating", tone: "wait", action: null, via: null },
+  confirmed: { label: "Confirmed", tone: "ok", action: null, via: null },
+  declined: { label: "Declined by the DJ", tone: "no", action: null, via: null },
+  expired: { label: "Expired", tone: "no", action: null, via: null },
+  cancelled: { label: "Cancelled", tone: "no", action: null, via: null },
 };
 
 /** What the bookings list shows for a request; an unknown status keeps the Gelatin link. */
-export function describeStatus(status: PartnerBookingStatus | undefined) {
-  return status ? LABELS[status] : { label: null, tone: "wait" as const, action: "Review and pay in Gelatin" };
+export function describeStatus(status: PartnerBookingStatus | undefined): Described {
+  return status ? LABELS[status] : { label: null, tone: "wait", action: "Review and pay in Gelatin", via: "gelatin" };
 }

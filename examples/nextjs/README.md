@@ -1,6 +1,6 @@
 # Next.js partner example
 
-A complete, runnable partner website that books Gelatin DJs with this SDK. It does what your platform will do: show Gelatin's DJs, send the organizer's booking request, hand the organizer to Gelatin's booking page to review the offer, negotiate and place a card hold, then welcome them back and show each booking's live status.
+A complete, runnable partner website that books Gelatin DJs with this SDK. It does what your platform will do: show Gelatin's DJs, send the organizer's booking request, take the card hold on its own page in Stripe's checkout form, hand the organizer to Gelatin's booking page when a DJ counters, and show each booking's live status.
 
 **In plain words:** this is a small pretend events website. Run it on your laptop against Gelatin's sandbox, click through the whole booking journey with test cards, and read the code to see exactly which calls your own site needs to make, and where. Nothing here touches real money.
 
@@ -11,7 +11,7 @@ Gelatin sets these up for you in the sandbox:
 | What | Example | Used as |
 | --- | --- | --- |
 | Partner slug | `your-partner` | `GELATIN_PARTNER_SLUG` |
-| Sandbox API key, starting `gel_test_`, with scopes `catalog:read`, `requests:write`, `launch:write` and `bookings:read` | sent through 1Password | `GELATIN_PARTNER_KEY` |
+| Sandbox API key, starting `gel_test_`, with scopes `catalog:read`, `requests:write`, `launch:write` and `bookings:read` | sent to you privately | `GELATIN_PARTNER_KEY` |
 | Your booking page origin, where organizers review and pay | `https://your-partner.staging.gelatinbookings.com` | `GELATIN_PORTAL_ORIGINS` |
 | A registered return origin for this example | `http://127.0.0.1:3100` | `DEMO_PUBLIC_ORIGIN` |
 
@@ -37,9 +37,9 @@ Open `http://127.0.0.1:3100` (not `localhost`: the address must match `DEMO_PUBL
 
 1. **Find DJs** (`/`). The list comes from your partner catalog. Filter by city, or pick a date to see who is available that night.
 2. **Your event.** Add one to five DJs, fill in the event and an organizer email you can read, set a fee per DJ and send. Gelatin replies with each DJ's organizer total, fees included.
-3. **Bookings** (`/bookings`). One row per DJ. Choose **Review and pay in Gelatin**. The browser goes to your Gelatin booking page with a one-use link.
-4. **On Gelatin**, the organizer reviews the offer and places a card hold. Use Stripe's test card `4242 4242 4242 4242`, any future expiry and any CVC. No money moves yet.
-5. **Back to your event** returns to this site's `/return` page, which reads the latest status from Gelatin.
+3. **Bookings** (`/bookings`). One row per DJ. Choose **Pay now**: Stripe's checkout opens under the row, on this site's own page. Use Stripe's test card `4242 4242 4242 4242`, any future expiry and any CVC (`4000 0027 6000 3184` shows the bank's extra security check). No money moves yet.
+4. **Card held.** Within a few seconds the row reads *Card held · waiting for the DJ*: Stripe has confirmed the hold to Gelatin and the DJ has the request.
+5. **A new offer** from a DJ shows *Review the new offer in Gelatin*. That opens your Gelatin booking page with a one-use link, where the organizer accepts, declines or pays the new amount, then *Back to your event* returns to this site's `/return` page.
 6. **The DJ answers** in their Gelatin inbox. In the sandbox someone on the Gelatin team plays the DJ, so tell them when you've placed a hold. Ask them to try each outcome:
    - **Accept:** Gelatin takes the payment and emails the organizer. The row shows *Confirmed*.
    - **Counter:** the DJ proposes a different fee. The row shows *New offer from the DJ*; open it in Gelatin to accept the new amount with a fresh card hold, or keep negotiating.
@@ -49,7 +49,7 @@ Reload `/bookings` at any point to see the current status. The statuses the exam
 
 | Status | Shown as | What the organizer does |
 | --- | --- | --- |
-| `authorization_required` | Payment needed | Open Gelatin and place the card hold |
+| `authorization_required` | Payment needed | Pay now, on this page |
 | `reauthorization_required` | New offer from the DJ | Open Gelatin and review the counteroffer |
 | `requested` | Card held · waiting for the DJ | Nothing; the DJ is deciding, or has accepted and the payment is going through |
 | `negotiating` | Negotiating | Nothing; the DJ is answering the organizer's counteroffer |
@@ -65,7 +65,8 @@ Everything that talks to Gelatin runs on the server. The browser never sees the 
 | [`lib/gelatin.ts`](lib/gelatin.ts) | Creating the SDK client, checking that a launch URL is really your Gelatin booking page, and turning `PartnerApiError` codes into messages |
 | [`app/page.tsx`](app/page.tsx) | `listDjs`: the catalog, with city and date filters and paging |
 | [`lib/submission.ts`](lib/submission.ts) | Building the booking request: your IDs, the organizer, the event times with an explicit time zone, and one entry per DJ |
-| [`lib/handlers.ts`](lib/handlers.ts) | `submitBookingRequests` and `createPortalLaunch`, called from this app's own API routes |
+| [`lib/handlers.ts`](lib/handlers.ts) | `submitBookingRequests`, `createPaymentSession` and `createPortalLaunch`, called from this app's own API routes |
+| [`app/pay-button.tsx`](app/pay-button.tsx) | Mounting Stripe's checkout in the page with the client secret, and falling back to Gelatin on `portal_required` |
 | [`lib/status.ts`](lib/status.ts) | `getEventBookings`: reading each DJ's status by your event ID |
 | [`app/return/page.tsx`](app/return/page.tsx) | The return page Gelatin sends the organizer back to |
 
@@ -76,6 +77,8 @@ Rules the code follows that your site should too:
 - **Keep one organizer ID per person.** Gelatin remembers the email it first saw for an `external_user_id`, so use your user's stable ID, and launch with the same organizer ID the booking was submitted with.
 - **Create the launch when the organizer clicks, then redirect at once.** A launch link works once and expires after about 60 seconds, so don't put one in an email or keep it for later.
 - **Only redirect to your booking page.** Check that the launch URL is on your Gelatin booking page origin before sending the browser there, as `approvedLaunchUrl` does.
+- **Hand the client secret to that organizer only.** It opens only their checkout, but treat it like a one-time link: don't log it or store it.
+- **Trust status, not the browser.** When Stripe's form finishes, show "confirming" and read status; the hold counts once Gelatin reports `requested`.
 - **Read status when you show it.** Gelatin does not call your server. Read status when the organizer returns, when they open the event, or on a schedule.
 
 ## What is example scaffolding

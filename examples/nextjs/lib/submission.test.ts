@@ -42,7 +42,7 @@ describe("demo booking packet", () => {
       "demo-req-0b6f8f4e-8a43-4b8a-9d55-5c5f1c1e2a10-1", "demo-req-0b6f8f4e-8a43-4b8a-9d55-5c5f1c1e2a10-2",
     ]);
     expect(first.submission.requests[0].initial_offer).toEqual({ currency: "usd", dj_fee_cents: 45_000 });
-    expect(first.submission.authorization_placement).toBe("gelatin_portal_handoff");
+    expect(first.submission.authorization_placement).toBe("partner_event_flow");
     expect(first.submission.return_url).toBe("https://partner-demo.staging.gelatinbookings.com/return?event=demo-evt-0b6f8f4e-8a43-4b8a-9d55-5c5f1c1e2a10");
   });
 

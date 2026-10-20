@@ -66,7 +66,8 @@ export function buildSubmission(form: DemoBookingForm, publicOrigin: string): {
         dj_id: dj.id,
         initial_offer: { currency: "usd", dj_fee_cents: dj.fee_dollars * 100, ...(form.note ? { note: form.note } : {}) },
       })),
-      authorization_placement: "gelatin_portal_handoff",
+      // The bookings page takes the first card hold; a DJ's counteroffer is reviewed in Gelatin.
+      authorization_placement: "partner_event_flow",
       return_url: returnUrl.toString(),
     },
   };

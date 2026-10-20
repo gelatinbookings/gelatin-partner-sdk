@@ -51,10 +51,11 @@ describe("demo booking status", () => {
     expect(statuses).toEqual({ r3: "declined" });
   });
 
-  it("offers the Gelatin button only when the organizer has something to do, or the status is unknown", () => {
-    expect(describeStatus("authorization_required")).toMatchObject({ action: "Review and pay in Gelatin" });
-    expect(describeStatus("reauthorization_required")).toMatchObject({ action: "Review the new offer in Gelatin" });
-    expect(describeStatus(undefined)).toMatchObject({ label: null, action: "Review and pay in Gelatin" });
+  it("offers an action only when the organizer has something to do, or the status is unknown", () => {
+    // The first hold is paid on this page; a DJ's new offer is reviewed in Gelatin.
+    expect(describeStatus("authorization_required")).toMatchObject({ action: "Pay now", via: "page" });
+    expect(describeStatus("reauthorization_required")).toMatchObject({ action: "Review the new offer in Gelatin", via: "gelatin" });
+    expect(describeStatus(undefined)).toMatchObject({ label: null, action: "Review and pay in Gelatin", via: "gelatin" });
     for (const status of ["requested", "negotiating", "confirmed", "declined", "expired", "cancelled"] as const) {
       expect(describeStatus(status).action, status).toBeNull();
       expect(describeStatus(status).label, status).toBeTruthy();

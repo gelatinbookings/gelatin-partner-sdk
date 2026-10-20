@@ -3,7 +3,7 @@ import { PartnerApiError } from "@gelatinbookings/partner-sdk/server";
 import { readDemoConfig, type DemoConfig } from "./config";
 import { cookieNames, hasValidSession, issueSession, readBookings, readCookie, writeBookings, type DemoBooking } from "./cookies";
 import { approvedLaunchUrl, type GelatinClient } from "./gelatin";
-import { createBookingPost, createLaunchPost, createLoginPost, createLogoutPost, memoryLoginLimiter, type HandlerDeps } from "./handlers";
+import { createBookingPost, createLaunchPost, createLoginPost, createLogoutPost, createPaymentPost, memoryLoginLimiter, type HandlerDeps } from "./handlers";
 
 const config: DemoConfig = readDemoConfig({
   GELATIN_API_BASE_URL: "https://staging.gelatinbookings.com",
@@ -108,7 +108,7 @@ describe("demo access", () => {
 });
 
 describe("booking submission", () => {
-  it("sends one idempotent portal-handoff packet and records the result in a signed cookie", async () => {
+  it("sends one idempotent in-flow packet and records the result in a signed cookie", async () => {
     const submitBookingRequests = vi.fn(async () => ({
       group_id: "g", event_id: "e",
       engagements: [{ id: "x", external_request_id: "r", dj_id: DJ_ID.toUpperCase(), request_id: REQUEST_ID, booking_id: "b", offer_id: "o", revision: 1, total_cents: 54_200, currency: "usd" }],
@@ -121,7 +121,8 @@ describe("booking submission", () => {
     // The SDK keys the write on the nonce-derived booking ID (`booking:<external_booking_id>`).
     expect(options).toBeUndefined();
     expect(packet.external_booking_id).toBe(`demo-bkg-${form.nonce}`);
-    expect(packet.authorization_placement).toBe("gelatin_portal_handoff");
+    // This site takes the first card hold itself; counteroffers go to Gelatin.
+    expect(packet.authorization_placement).toBe("partner_event_flow");
     expect(new URL(packet.return_url).origin).toBe(ORIGIN);
     const saved = readBookings(config, readCookie(cookieValue(response.headers.get("set-cookie") ?? ""), names.bookings));
     expect(saved[0].engagements).toEqual([{ requestId: REQUEST_ID, djName: "DJ One", totalCents: 54_200, currency: "usd" }]);
@@ -180,6 +181,47 @@ describe("portal launch", () => {
     expect(approvedLaunchUrl(`https://book-demo.staging.gelatinbookings.com/partner/launch?token=${token}`, allowed)).toBeNull();
     expect(approvedLaunchUrl(`https://book-demo.staging.gelatinbookings.com.evil.example/partner/launch#token=${token}`, allowed)).toBeNull();
     expect(approvedLaunchUrl("javascript:alert(1)", allowed)).toBeNull();
+  });
+});
+
+describe("payment on this page", () => {
+  const withBooking = () => `${sessionCookie()}; ${cookieValue(writeBookings(config, [booking]))}`;
+  const session = { client_secret: `cs_test_a1_secret_${"fidw%60%3Fb2".repeat(30)}`, publishable_key: "pk_test_c3", total_cents: 54_200, currency: "usd" };
+
+  it("starts the hold only for a booking from this browser, as its original organizer", async () => {
+    const createPaymentSession = vi.fn(async () => session);
+    const response = await createPaymentPost(deps({ createPaymentSession }))(post("/api/payment", { event_id: booking.eventId, request_id: REQUEST_ID }, { cookie: withBooking() }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ client_secret: session.client_secret, publishable_key: session.publishable_key });
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const [input, options] = createPaymentSession.mock.calls[0] as unknown as [Record<string, unknown>, unknown];
+    expect(input).toEqual({ external_event_id: booking.eventId, external_user_id: booking.organizerId, resource: { kind: "request", id: REQUEST_ID } });
+    expect(options).toBeUndefined();
+  });
+
+  it("refuses other bookings, cross-site posts and missing sessions before calling Gelatin", async () => {
+    const createPaymentSession = vi.fn(async () => session);
+    const handler = createPaymentPost(deps({ createPaymentSession }));
+    expect((await handler(post("/api/payment", { event_id: booking.eventId, request_id: "44444444-4444-4444-8444-444444444444" }, { cookie: withBooking() }))).status).toBe(404);
+    expect((await handler(post("/api/payment", { event_id: booking.eventId, request_id: REQUEST_ID }, { cookie: withBooking(), origin: "https://evil.example" }))).status).toBe(403);
+    expect((await handler(post("/api/payment", { event_id: booking.eventId, request_id: REQUEST_ID }))).status).toBe(401);
+    expect((await handler(post("/api/payment", { event_id: booking.eventId, request_id: REQUEST_ID, amount: 1 }, { cookie: withBooking() }))).status).toBe(400);
+    expect(createPaymentSession).not.toHaveBeenCalled();
+  });
+
+  it("sends the organizer to Gelatin when the offer must be reviewed there", async () => {
+    const createPaymentSession = vi.fn(async () => { throw new PartnerApiError(409, "portal_required", "Partner API request failed", "req_9"); });
+    const response = await createPaymentPost(deps({ createPaymentSession }))(post("/api/payment", { event_id: booking.eventId, request_id: REQUEST_ID }, { cookie: withBooking() }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ portal: true });
+  });
+
+  it("refuses a live publishable key or a malformed client secret from Gelatin", async () => {
+    for (const bad of [{ ...session, publishable_key: "pk_live_c3" }, { ...session, client_secret: "pi_test_x" }]) {
+      const response = await createPaymentPost(deps({ createPaymentSession: vi.fn(async () => bad) }))(post("/api/payment", { event_id: booking.eventId, request_id: REQUEST_ID }, { cookie: withBooking() }));
+      expect(response.status).toBe(502);
+      expect(await response.text()).not.toContain("cs_test");
+    }
   });
 });
 

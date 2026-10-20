@@ -153,3 +153,10 @@ h1, h2, h3, p { margin: 0; }
   .engagement .stack { align-items: stretch !important; }
   .engagement .button { width: 100%; }
 }
+
+/* Stripe's embedded checkout opens under the DJ's row at full width. */
+.engagement:has(.pay-panel) { flex-direction: column; align-items: stretch; }
+.engagement:has(.pay-panel) > .stack { align-items: stretch !important; }
+.engagement:has(.pay-panel) .tag { align-self: flex-start; }
+.pay-panel { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; margin-top: 4px; }
+.pay-panel > div { width: 100%; }
