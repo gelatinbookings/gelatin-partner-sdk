@@ -39,7 +39,7 @@ Open `http://127.0.0.1:3100` (not `localhost`: the address must match `DEMO_PUBL
 The booking takes four pages, one per step. The **Testing guide** button in the header lists the test cards and, once you've signed in, the sandbox test DJs you can sign in as.
 
 1. **Date & DJs** (`/`). Pick the night first. The list comes from your partner catalog with availability for that night, and only free DJs can be added. That night becomes the booking date.
-2. **Event** (`/event`). The event name, venue, times and an organizer email you can read. "Fill with sample details" puts in a made-up name and venue.
+2. **Event** (`/event`). The event name, venue, the venue's address, times and an organizer email you can read. Gelatin shows the address to the DJ. "Fill with sample details" puts in a made-up name, venue and address.
 3. **Offer** (`/offer`). A fee per DJ and an optional note, then **Send**. Gelatin replies with each DJ's organizer total, fees included.
 4. **Pay** (`/bookings`). One row per DJ. **Pay now** opens Stripe's checkout on this page. Use `4242 4242 4242 4242`, any future expiry and any CVC (`4000 0027 6000 3184` shows the bank's extra security check). The card is only held; no money moves yet.
 

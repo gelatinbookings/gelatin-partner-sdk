@@ -12,6 +12,7 @@ export type Draft = {
   date: string;
   eventName: string;
   venueName: string;
+  venueAddress: string;
   startTime: string;
   endTime: string;
   timeZone: string;
@@ -23,7 +24,7 @@ export type Draft = {
 
 export function freshDraft(nonce: string): Draft {
   return {
-    nonce, date: "", eventName: "", venueName: "", startTime: "21:00", endTime: "01:00",
+    nonce, date: "", eventName: "", venueName: "", venueAddress: "", startTime: "21:00", endTime: "01:00",
     timeZone: "America/New_York", email: "", organizerName: "", note: "", selected: [],
   };
 }
@@ -58,7 +59,7 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /** Step 2 is done when every required event field is filled in. */
 export function eventComplete(draft: Draft): boolean {
   return Boolean(
-    draft.eventName.trim() && draft.venueName.trim() && draft.organizerName.trim()
+    draft.eventName.trim() && draft.venueName.trim() && draft.venueAddress.trim() && draft.organizerName.trim()
     && EMAIL.test(draft.email.trim()) && /^\d{2}:\d{2}$/.test(draft.startTime) && /^\d{2}:\d{2}$/.test(draft.endTime)
     && (DEMO_TIME_ZONES as readonly string[]).includes(draft.timeZone),
   );
@@ -74,7 +75,7 @@ export function submissionBody(draft: Draft): { body: Record<string, unknown> } 
   }
   return {
     body: {
-      nonce: draft.nonce, event_name: draft.eventName, venue_name: draft.venueName, date: draft.date,
+      nonce: draft.nonce, event_name: draft.eventName, venue_name: draft.venueName, venue_address: draft.venueAddress, date: draft.date,
       start_time: draft.startTime, end_time: draft.endTime, time_zone: draft.timeZone,
       organizer_email: draft.email.trim(), organizer_name: draft.organizerName,
       ...(draft.note.trim() ? { note: draft.note } : {}),

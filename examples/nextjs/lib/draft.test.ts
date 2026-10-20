@@ -7,7 +7,7 @@ const DJ = { id: "22222222-2222-4222-8222-222222222222", name: "DJ One", availab
 
 function ready(): Draft {
   return {
-    ...freshDraft(NONCE), date: "2031-11-13", eventName: "Community Friday", venueName: "The Room",
+    ...freshDraft(NONCE), date: "2031-11-13", eventName: "Community Friday", venueName: "The Room", venueAddress: "12 Example St, Atlanta, GA",
     email: "organizer@example.test", organizerName: "Sam Rivera",
     selected: [{ id: DJ.id, name: DJ.name, fee: "300" }],
   };
@@ -42,6 +42,7 @@ describe("booking draft", () => {
     expect(eventComplete(ready())).toBe(true);
     expect(eventComplete({ ...ready(), email: "not-an-email" })).toBe(false);
     expect(eventComplete({ ...ready(), venueName: " " })).toBe(false);
+    expect(eventComplete({ ...ready(), venueAddress: "" })).toBe(false);
   });
 
   it("builds a body the demo server accepts, with the step 1 date", () => {

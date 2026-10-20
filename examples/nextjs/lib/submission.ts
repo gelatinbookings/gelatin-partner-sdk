@@ -12,6 +12,8 @@ export const demoBookingFormSchema = z.strictObject({
   nonce: z.uuid(),
   event_name: text(120),
   venue_name: text(120),
+  // Shown to the DJ in Gelatin so they know where to go.
+  venue_address: text(200),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   start_time: z.string().regex(/^\d{2}:\d{2}$/),
   end_time: z.string().regex(/^\d{2}:\d{2}$/),
@@ -71,6 +73,7 @@ export function buildSubmission(form: DemoBookingForm, publicOrigin: string): {
     ends_at: interval.ends_at,
     time_zone: form.time_zone,
     venue_name: form.venue_name,
+    venue_address: form.venue_address,
   };
 
   // One entry per DJ. Each is paid and answered on its own. The fee is what the
