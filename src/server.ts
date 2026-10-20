@@ -2,16 +2,17 @@ import type {
   AttendanceAggregate,
   AttendanceResult,
   AuthorizationAction,
+  BookingActionKind,
+  BookingRequest,
   BookingRequestResult,
   ConditionalEventBookings,
   DjCatalogPage,
   DjCatalogQuery,
-  DjRequestSubmission,
-  EventBookingProjection,
+  EventBookings,
   EventChange,
   EventChangeResult,
-  LaunchSessionRequest,
-  LaunchSessionResult,
+  PortalLaunchRequest,
+  PortalLaunchResult,
   PaymentSessionRequest,
   PaymentSessionResult,
   PartnerBookingStatus,
@@ -177,7 +178,7 @@ function bookingRequestResult(value: unknown): BookingRequestResult {
   };
 }
 
-function launchResult(value: unknown): LaunchSessionResult {
+function launchResult(value: unknown): PortalLaunchResult {
   const body = object(value);
   return { url: string(body.url), expires_at: string(body.expires_at) };
 }
@@ -192,7 +193,7 @@ function paymentSessionResult(value: unknown): PaymentSessionResult {
   };
 }
 
-function eventBookings(value: unknown): EventBookingProjection {
+function eventBookings(value: unknown): EventBookings {
   const body = object(value);
   return {
     external_event_id: string(body.external_event_id),
@@ -213,7 +214,7 @@ function eventBookings(value: unknown): EventBookingProjection {
             amount: row.amount === null ? null : amount(row.amount),
             actions: array(row.actions).map((item) => {
               const action = object(item);
-              return { kind: literal(action.kind, ACTIONS) as EventBookingProjection["bookings"][number]["requests"][number]["actions"][number]["kind"], url: string(action.url) };
+              return { kind: literal(action.kind, ACTIONS) as BookingActionKind, url: string(action.url) };
             }),
           };
         }),
@@ -416,7 +417,7 @@ export function createPartnerClient(options: PartnerClientOptions) {
      * `booking:<external_booking_id>`: Gelatin accepts each external booking ID
      * once, so a resend returns the original result.
      */
-    async submitBookingRequests(input: DjRequestSubmission, options: DefaultedWriteOptions = {}): Promise<BookingRequestResult> {
+    async submitBookingRequests(input: BookingRequest, options: DefaultedWriteOptions = {}): Promise<BookingRequestResult> {
       const idempotencyKey = options.idempotencyKey ?? `booking:${input.external_booking_id}`;
       return json(await request("booking-requests", "POST", input, { ...options, idempotencyKey }), bookingRequestResult);
     },
@@ -425,7 +426,7 @@ export function createPartnerClient(options: PartnerClientOptions) {
      * immediately; never log it. The key defaults to a fresh UUID per call, so
      * each click gets a new link; built-in retries reuse it.
      */
-    async createPortalLaunch(input: LaunchSessionRequest, options: DefaultedWriteOptions = {}): Promise<LaunchSessionResult> {
+    async createPortalLaunch(input: PortalLaunchRequest, options: DefaultedWriteOptions = {}): Promise<PortalLaunchResult> {
       const idempotencyKey = options.idempotencyKey ?? randomKey();
       return json(await request("portal-launches", "POST", input, { ...options, idempotencyKey }), launchResult);
     },
@@ -441,11 +442,11 @@ export function createPartnerClient(options: PartnerClientOptions) {
       return json(await request("payment-sessions", "POST", input, { ...options, idempotencyKey }), paymentSessionResult);
     },
     /** Proposed alpha route; not mounted. Use `submitBookingRequests`. */
-    async submitDjRequests(input: DjRequestSubmission, options: WriteOptions): Promise<SubmissionResult> {
+    async submitDjRequests(input: BookingRequest, options: WriteOptions): Promise<SubmissionResult> {
       return json(await request("dj-request-submissions", "POST", input, options), submissionResult);
     },
     /** Proposed alpha route; not mounted. Use `createPortalLaunch`. */
-    async createLaunchSession(input: LaunchSessionRequest, options: WriteOptions): Promise<LaunchSessionResult> {
+    async createLaunchSession(input: PortalLaunchRequest, options: WriteOptions): Promise<PortalLaunchResult> {
       return json(await request("launch-sessions", "POST", input, options), launchResult);
     },
     async getEventBookings(eventId: string, options: ReadOptions & { ifNoneMatch?: string } = {}): Promise<ConditionalEventBookings> {

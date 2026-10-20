@@ -31,7 +31,7 @@ Not using JavaScript? Every call is a plain HTTPS request with JSON, described i
 ## Install
 
 ```sh
-npm install github:gelatinbookings/gelatin-partner-sdk#v0.1.0-alpha.2
+npm install github:gelatinbookings/gelatin-partner-sdk#v0.1.0-alpha.3
 ```
 
 Requires Node.js 20 or later. The package builds itself on install.
@@ -108,6 +108,46 @@ A runnable version is in [`examples/quickstart.ts`](examples/quickstart.ts).
 For a complete website, see the [Next.js partner example](examples/nextjs/README.md): a small events site you can run against the sandbox and click through the whole journey, including payment, the DJ's reply and live status.
 
 Gelatin never calls your server. Status is pull-only: read it when the organizer comes back, when they open the event, or on a schedule. Pass `{ ifNoneMatch: lastEtag }` to skip unchanged reads: the result is `{ modified: false }` until something changes, then `{ modified: true, etag, data }`.
+
+## Request and response shapes
+
+Every shape is a named, commented type in [`src/types.ts`](src/types.ts), in the same order as the journey. Each nested object has its own name, so you can build a request from parts:
+
+```ts
+import type { BookingRequest, DjRequest, EventDetails, Organizer } from "@gelatinbookings/partner-sdk/types";
+
+const organizer: Organizer = { external_user_id: "user_7", email: "organizer@example.com" };
+const event: EventDetails = {
+  name: "Friday Social",
+  starts_at: "2026-11-14T22:00:00-05:00",
+  ends_at: "2026-11-15T02:00:00-05:00",
+  time_zone: "America/New_York",
+  venue_name: "The Warehouse",
+};
+const requests: DjRequest[] = [
+  { external_request_id: "req_1", dj_id: "<PublicDj.id>", initial_offer: { currency: "usd", dj_fee_cents: 30000 } },
+];
+const body: BookingRequest = {
+  external_event_id: "event_123",
+  external_submission_id: "submission_42",
+  external_booking_id: "booking_42",
+  organizer,
+  event,
+  requests,
+  authorization_placement: "partner_event_flow",
+  return_url: "https://your-site.example/events/event_123",
+};
+```
+
+| Call | Sends | Gets back |
+| --- | --- | --- |
+| `listDjs` | `DjCatalogQuery` | `DjCatalogPage` of `PublicDj` |
+| `submitBookingRequests` | `BookingRequest` (`Organizer`, `EventDetails`, `DjRequest` with `DjOffer`) | `BookingRequestResult`, one `BookingRequestEngagement` per DJ |
+| `createPaymentSession` | `PaymentSessionRequest` | `PaymentSessionResult` |
+| `createPortalLaunch` | `PortalLaunchRequest` (`LaunchResource`) | `PortalLaunchResult` |
+| `getEventBookings` | your event ID | `ConditionalEventBookings`: `EventBookings` → `PartnerBooking` → `DjBookingStatus` |
+
+The old names `DjRequestSubmission`, `LaunchSessionRequest`, `LaunchSessionResult` and `EventBookingProjection` still work as aliases.
 
 ## Paying on your page
 
