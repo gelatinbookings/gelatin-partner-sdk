@@ -32,7 +32,7 @@ export default function BookingList({ bookings, highlight, statuses = {} }: { bo
             <div key={engagement.requestId} className="engagement">
               <span className="dj-copy">
                 <strong>{engagement.djName}</strong>
-                <small>Organizer total {money(engagement.totalCents, engagement.currency)}</small>
+                <small>Organizer total <span className="gel">{money(engagement.totalCents, engagement.currency)}</span></small>
                 <span className="mono">Request {engagement.requestId}</span>
               </span>
               {(() => {
@@ -42,6 +42,7 @@ export default function BookingList({ bookings, highlight, statuses = {} }: { bo
                     {status.label && <span className={`tag${status.tone === "ok" ? " tag-ok" : status.tone === "no" ? " tag-no" : ""}`}>{status.label}</span>}
                     {status.via === "page" && <PayButton eventId={booking.eventId} requestId={engagement.requestId} djName={engagement.djName} />}
                     {status.via === "gelatin" && status.action && <LaunchButton eventId={booking.eventId} requestId={engagement.requestId} djName={engagement.djName} label={status.action} />}
+                    {status.manage && <LaunchButton eventId={booking.eventId} requestId={engagement.requestId} djName={engagement.djName} label="Manage in Gelatin" secondary />}
                   </span>
                 );
               })()}

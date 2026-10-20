@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { describeStatus, readRequestStatuses } from "./status";
+import { describeStatus, readRequestStatuses, shouldPoll } from "./status";
 import type { DemoBooking } from "./cookies";
 
 const booking = (eventId: string, requestIds: string[]): DemoBooking => ({
@@ -49,6 +49,19 @@ describe("demo booking status", () => {
     });
     const statuses = await readRequestStatuses({ getEventBookings }, [booking("e1", ["r1"]), booking("e2", ["r3"])]);
     expect(statuses).toEqual({ r3: "declined" });
+  });
+
+  it("offers the managed Gelatin booking page once a request is with the DJ or booked", () => {
+    for (const status of ["requested", "negotiating", "confirmed"] as const) expect(describeStatus(status).manage, status).toBe(true);
+    for (const status of ["authorization_required", "reauthorization_required", "declined", "expired", "cancelled"] as const) expect(describeStatus(status).manage, status).toBe(false);
+  });
+
+  it("keeps reading status only while a DJ still has to answer", () => {
+    expect(shouldPoll({ a: "requested" })).toBe(true);
+    expect(shouldPoll({ a: "confirmed", b: "negotiating" })).toBe(true);
+    // Nothing changes on Gelatin's side until the organizer acts, or it is final.
+    expect(shouldPoll({ a: "authorization_required", b: "confirmed", c: "declined" })).toBe(false);
+    expect(shouldPoll({})).toBe(false);
   });
 
   it("offers an action only when the organizer has something to do, or the status is unknown", () => {

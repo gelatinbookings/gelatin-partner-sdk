@@ -7,6 +7,16 @@ import { loadStripe } from "@stripe/stripe-js";
 type Session = { clientSecret: string; publishableKey: string };
 
 /**
+ * Gelatin call 3 of 5, in the browser: show Stripe's checkout on this page.
+ *
+ * 1. "Pay now" asks this site's server (/api/payment), which calls
+ *    `createPaymentSession`. The API key stays on the server; the browser only
+ *    gets `client_secret` and `publishable_key`.
+ * 2. Stripe.js mounts the checkout with them. Card details go to Stripe only.
+ * 3. When Stripe finishes, the hold isn't trusted yet: show "Confirming" and
+ *    re-read status until Gelatin reports `requested` (Stripe tells Gelatin
+ *    by webhook, which takes a few seconds).
+ *
  * Pays for one DJ right here: the demo server asks Gelatin for a payment
  * session, and Stripe's embedded checkout opens under the row. Card details go
  * to Stripe only. A DJ's counteroffer, or a hold started in Gelatin, falls back
@@ -33,6 +43,7 @@ export default function PayButton({ eventId, requestId, djName }: { eventId: str
     try {
       const { response, body } = await post("/api/payment");
       if (response.status === 401) { router.push("/login"); return; }
+      // `409 portal_required`: a DJ's counteroffer is paid in Gelatin, not here.
       if (response.status === 409 && body.portal === true) {
         // This offer is finished in Gelatin: hand over with a one-use link instead.
         const launch = await post("/api/launch");
@@ -57,7 +68,7 @@ export default function PayButton({ eventId, requestId, djName }: { eventId: str
     const timer = window.setInterval(() => {
       count += 1;
       router.refresh();
-      if (count >= 10) window.clearInterval(timer);
+      if (count >= 40) window.clearInterval(timer);
     }, 3000);
     return () => window.clearInterval(timer);
   }, [state, router]);
@@ -65,7 +76,10 @@ export default function PayButton({ eventId, requestId, djName }: { eventId: str
   if (state === "paying" && session) {
     return (
       <div className="pay-panel">
-        <EmbeddedCheckout session={session} onComplete={() => setState("confirming")} />
+        <div className="pay-frame">
+          <span className="pay-frame-tag">Secure checkout · served by Gelatin</span>
+          <EmbeddedCheckout session={session} onComplete={() => setState("confirming")} />
+        </div>
         <button className="link-button" type="button" onClick={() => { setSession(null); setState("idle"); }}>Cancel</button>
       </div>
     );

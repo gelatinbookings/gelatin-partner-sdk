@@ -83,6 +83,13 @@ function authorized(request: Request, config: DemoConfig) {
   return hasValidSession(config, readCookie(request.headers.get("cookie"), cookieNames(config).session));
 }
 
+/**
+ * POST /api/bookings: the organizer sends step 3's offer.
+ *
+ * Gelatin call 2 of 5, part 2: `submitBookingRequests`. Gelatin answers with
+ * one engagement per DJ. Keep `request_id` and the organizer ID with your
+ * event: you need them to pay, to open Gelatin's page and to match status.
+ */
 export function createBookingPost(deps: HandlerDeps) {
   return async (request: Request) => {
     const config = loadConfig(deps);
@@ -103,6 +110,8 @@ export function createBookingPost(deps: HandlerDeps) {
 
     try {
       const result = await deps.client(config).submitBookingRequests(built.submission);
+      // Scaffolding: this example has no database, so it keeps the IDs in a
+      // signed cookie. Your site stores them with its own event record.
       const cookieName = cookieNames(config).bookings;
       const existing = readBookings(config, readCookie(request.headers.get("cookie"), cookieName))
         .filter((booking) => booking.eventId !== built.submission.external_event_id);
@@ -114,6 +123,7 @@ export function createBookingPost(deps: HandlerDeps) {
         engagements: result.engagements.map((engagement) => ({
           requestId: engagement.request_id,
           djName: djNames.get(engagement.dj_id.toLowerCase()) ?? "DJ",
+          // Gelatin's organizer total, fees included. Show it; never compute it.
           totalCents: engagement.total_cents,
           currency: engagement.currency,
         })),
@@ -130,6 +140,14 @@ export function createBookingPost(deps: HandlerDeps) {
 
 const launchSchema = z.strictObject({ event_id: z.string().min(1).max(200), request_id: z.uuid() });
 
+/**
+ * POST /api/launch: the organizer clicks "Manage in Gelatin" or "Review the
+ * new offer in Gelatin".
+ *
+ * Gelatin call 4 of 5: `createPortalLaunch`. It returns a one-use link to
+ * your Gelatin booking page that expires in about 60 seconds, so create it on
+ * the click and redirect straight away. Never email or store it.
+ */
 export function createLaunchPost(deps: HandlerDeps) {
   return async (request: Request) => {
     const config = loadConfig(deps);
@@ -155,6 +173,7 @@ export function createLaunchPost(deps: HandlerDeps) {
         resource: { kind: "request", id: input.request_id },
         return_url: returnUrl.toString(),
       });
+      // Only ever redirect to your own Gelatin booking page.
       const url = approvedLaunchUrl(launch.url, config.portalOrigins);
       if (!url) {
         console.error("Refused a Gelatin launch URL outside GELATIN_PORTAL_ORIGINS");
@@ -171,11 +190,17 @@ export function createLaunchPost(deps: HandlerDeps) {
 const paymentSessionShape = z.object({
   // URL-encoded by Stripe, so `%` appears.
   client_secret: z.string().max(1000).regex(/^cs_test_[A-Za-z0-9_%]+$/),
-  // Staging only: a live key would mean live money.
+  // Sandbox only: this example refuses live keys. Your site would accept pk_live_ in production.
   publishable_key: z.string().max(500).regex(/^pk_test_[A-Za-z0-9]+$/),
 });
 
 /**
+ * POST /api/payment: the organizer clicks "Pay now" for one DJ.
+ *
+ * Gelatin call 3 of 5: `createPaymentSession`. It starts, or resumes, the card
+ * hold for the organizer's own offer and returns the values Stripe.js needs to
+ * show its checkout on this page (see app/pay-button.tsx).
+ *
  * Start (or resume) the card hold for one DJ on this page. The client secret
  * opens only that Stripe checkout, so it goes to this organizer's browser and
  * nowhere else. Paying here doesn't confirm anything by itself: the bookings

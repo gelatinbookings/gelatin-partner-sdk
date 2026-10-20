@@ -4,6 +4,14 @@ import type { DemoConfig } from "./config";
 
 export type GelatinClient = ReturnType<typeof createPartnerClient>;
 
+/**
+ * The one SDK client this site uses. It's server-only: `server-only` above
+ * makes the build fail if a browser component imports this file, so the API
+ * key can never reach the browser.
+ *
+ * `baseUrl` is Gelatin's origin plus your partner slug. The client adds the
+ * key, idempotency keys, timeouts and safe retries to every call.
+ */
 export function gelatinClient(config: DemoConfig): GelatinClient {
   return createPartnerClient({
     baseUrl: `${config.apiOrigin}/v1/partners/${config.partnerSlug}`,
@@ -12,6 +20,7 @@ export function gelatinClient(config: DemoConfig): GelatinClient {
 }
 
 /**
+ * Check a `createPortalLaunch` URL before redirecting to it.
  * Accept only Gelatin's portal launch shape on an approved origin, so a
  * compromised or misconfigured response can never send the organizer elsewhere.
  */
@@ -37,7 +46,11 @@ const MESSAGES: Record<string, string> = {
   rate_limited: "Too many requests. Wait a minute and try again.",
 };
 
-/** A short, non-revealing message plus Gelatin's request ID for support. */
+/**
+ * Every SDK call throws `PartnerApiError` on failure, with a stable `code`
+ * (see the SDK README's error table) and Gelatin's `requestId`. Show a short
+ * message and keep the request ID for support; never show the raw response.
+ */
 export function describeGelatinError(error: unknown): { message: string; requestId: string | null; status: number } {
   if (error instanceof PartnerApiError) {
     const message = MESSAGES[error.code]

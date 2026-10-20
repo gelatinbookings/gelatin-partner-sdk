@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 /** Asks the demo server for a one-use Gelatin link and goes there immediately. */
-export default function LaunchButton({ eventId, requestId, djName, label = "Review and pay in Gelatin" }: { eventId: string; requestId: string; djName: string; label?: string }) {
+export default function LaunchButton({ eventId, requestId, djName, label = "Review and pay in Gelatin", secondary = false }: { eventId: string; requestId: string; djName: string; label?: string; secondary?: boolean }) {
   const router = useRouter();
   const [state, setState] = useState<"idle" | "sending" | "error">("idle");
   const [message, setMessage] = useState("");
@@ -34,7 +34,7 @@ export default function LaunchButton({ eventId, requestId, djName, label = "Revi
 
   return (
     <span className="stack" style={{ gap: 6, alignItems: "flex-end" }}>
-      <button className="button" type="button" onClick={launch} disabled={state === "sending"} aria-label={`Open ${djName} in Gelatin`}>
+      <button className={secondary ? "button-secondary" : "button"} type="button" onClick={launch} disabled={state === "sending"} aria-label={`Open ${djName} in Gelatin`}>
         {state === "sending" ? "Opening…" : label}
       </button>
       {state === "error" && <span className="hint" role="alert" style={{ color: "var(--danger)" }}>{message}</span>}
