@@ -31,7 +31,7 @@ Not using JavaScript? Every call is a plain HTTPS request with JSON, described i
 ## Install
 
 ```sh
-npm install github:gelatinbookings/gelatin-partner-sdk#v0.1.0-alpha.3
+npm install github:gelatinbookings/gelatin-partner-sdk#v0.1.0-alpha.4
 ```
 
 Requires Node.js 20 or later. The package builds itself on install.
@@ -73,6 +73,7 @@ const booking = await gelatin.submitBookingRequests({
     ends_at: "2026-11-15T02:00:00-05:00",
     time_zone: "America/New_York",
     venue_name: "The Warehouse",
+    venue_address: "123 Example St, Atlanta, GA 30303", // optional; the DJ sees it
   },
   requests: [
     { external_request_id: "req_1", dj_id: page.items[0].id, initial_offer: { currency: "usd", dj_fee_cents: 30000 } },
