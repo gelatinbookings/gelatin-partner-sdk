@@ -14,6 +14,7 @@ Gelatin sets these up for you in the sandbox:
 | Sandbox API key, starting `gel_test_`, with scopes `catalog:read`, `requests:write`, `launch:write` and `bookings:read` | sent to you privately | `GELATIN_PARTNER_KEY` |
 | Your booking page origin, where organizers review and pay | `https://your-partner.staging.gelatinbookings.com` | `GELATIN_PORTAL_ORIGINS` |
 | A registered return origin for this example | `http://127.0.0.1:3100` | `DEMO_PUBLIC_ORIGIN` |
+| Optional: the sandbox test DJs' password | sent to you privately | `DEMO_DJ_PASSWORD` |
 
 Gelatin only sends organizers back to origins registered for your partner, so ask for `http://127.0.0.1:3100` to be added before you run this locally. The sandbox accepts local `http` origins; live accepts only `https`.
 
@@ -35,15 +36,21 @@ Open `http://127.0.0.1:3100` (not `localhost`: the address must match `DEMO_PUBL
 
 ## Walk through the journey
 
-1. **Find DJs** (`/`). The list comes from your partner catalog. Filter by city, or pick a date to see who is available that night.
-2. **Your event.** Add one to five DJs, fill in the event and an organizer email you can read, set a fee per DJ and send. Gelatin replies with each DJ's organizer total, fees included.
-3. **Bookings** (`/bookings`). One row per DJ. Choose **Pay now**: Stripe's checkout opens under the row, on this site's own page. Use Stripe's test card `4242 4242 4242 4242`, any future expiry and any CVC (`4000 0027 6000 3184` shows the bank's extra security check). No money moves yet.
-4. **Card held.** Within a few seconds the row reads *Card held · waiting for the DJ*: Stripe has confirmed the hold to Gelatin and the DJ has the request.
-5. **A new offer** from a DJ shows *Review the new offer in Gelatin*. That opens your Gelatin booking page with a one-use link, where the organizer accepts, declines or pays the new amount, then *Back to your event* returns to this site's `/return` page.
-6. **The DJ answers** in their Gelatin inbox. In the sandbox someone on the Gelatin team plays the DJ, so tell them when you've placed a hold. Ask them to try each outcome:
-   - **Accept:** Gelatin takes the payment and emails the organizer. The row shows *Confirmed*.
-   - **Counter:** the DJ proposes a different fee. The row shows *New offer from the DJ*; open it in Gelatin to accept the new amount with a fresh card hold, or keep negotiating.
-   - **Decline:** the hold is released and the row shows *Declined by the DJ*.
+The booking takes four pages, one per step. The **Testing guide** button in the header lists the test cards and, once you've signed in, the sandbox test DJs you can sign in as.
+
+1. **Date & DJs** (`/`). Pick the night first. The list comes from your partner catalog with availability for that night, and only free DJs can be added. That night becomes the booking date.
+2. **Event** (`/event`). The event name, venue, times and an organizer email you can read. "Fill with sample details" puts in a made-up name and venue.
+3. **Offer** (`/offer`). A fee per DJ and an optional note, then **Send**. Gelatin replies with each DJ's organizer total, fees included.
+4. **Pay** (`/bookings`). One row per DJ. **Pay now** opens Stripe's checkout on this page. Use `4242 4242 4242 4242`, any future expiry and any CVC (`4000 0027 6000 3184` shows the bank's extra security check). The card is only held; no money moves yet.
+
+Then:
+
+- **Card held.** Within a few seconds the row reads *Card held · waiting for the DJ*, without a reload: the page re-reads status every 5 seconds while a DJ still has to answer.
+- **The DJ answers.** Sign in to Gelatin as the DJ you booked (Testing guide → Play the DJ, in a private window) and accept, counter or decline from the inbox. Or ask the Gelatin team to do it.
+  - **Accept:** Gelatin takes the payment and emails the organizer. The row shows *Confirmed*.
+  - **Counter:** the row shows *Review the new offer in Gelatin*. That opens your Gelatin booking page with a one-use link, where the organizer accepts the new amount with a fresh card hold. *Back to your event* returns to `/return`.
+  - **Decline:** the hold is released and the row shows *Declined by the DJ*.
+- **Manage in Gelatin** on any live booking opens it on your Gelatin booking page.
 
 Reload `/bookings` at any point to see the current status. The statuses the example shows:
 
@@ -60,15 +67,19 @@ Reload `/bookings` at any point to see the current status. The statuses the exam
 
 Everything that talks to Gelatin runs on the server. The browser never sees the API key.
 
-| File | What it shows |
-| --- | --- |
-| [`lib/gelatin.ts`](lib/gelatin.ts) | Creating the SDK client, checking that a launch URL is really your Gelatin booking page, and turning `PartnerApiError` codes into messages |
-| [`app/page.tsx`](app/page.tsx) | `listDjs`: the catalog, with city and date filters and paging |
-| [`lib/submission.ts`](lib/submission.ts) | Building the booking request: your IDs, the organizer, the event times with an explicit time zone, and one entry per DJ |
-| [`lib/handlers.ts`](lib/handlers.ts) | `submitBookingRequests`, `createPaymentSession` and `createPortalLaunch`, called from this app's own API routes |
-| [`app/pay-button.tsx`](app/pay-button.tsx) | Mounting Stripe's checkout in the page with the client secret, and falling back to Gelatin on `portal_required` |
-| [`lib/status.ts`](lib/status.ts) | `getEventBookings`: reading each DJ's status by your event ID |
-| [`app/return/page.tsx`](app/return/page.tsx) | The return page Gelatin sends the organizer back to |
+Each place the site calls Gelatin is commented "Gelatin call N of 5", in journey order:
+
+| Call | File | What it shows |
+| --- | --- | --- |
+| setup | [`lib/gelatin.ts`](lib/gelatin.ts) | Creating the server-only SDK client, checking launch URLs, and turning `PartnerApiError` codes into messages |
+| 1 `listDjs` | [`app/page.tsx`](app/page.tsx) | The catalog for one night, with availability and paging |
+| 2 `submitBookingRequests` | [`lib/submission.ts`](lib/submission.ts), [`lib/handlers.ts`](lib/handlers.ts) | Building the request from the SDK's named types (`Organizer`, `EventDetails`, `DjRequest`), sending it, and keeping the IDs Gelatin returns |
+| 3 `createPaymentSession` | [`lib/handlers.ts`](lib/handlers.ts), [`app/pay-button.tsx`](app/pay-button.tsx) | Starting the card hold on the server, and mounting Stripe's checkout in the page |
+| 4 `createPortalLaunch` | [`lib/handlers.ts`](lib/handlers.ts), [`app/launch-button.tsx`](app/launch-button.tsx) | The one-use link to your Gelatin booking page, for counteroffers and "Manage in Gelatin" |
+| 5 `getEventBookings` | [`lib/status.ts`](lib/status.ts), [`app/status-poller.tsx`](app/status-poller.tsx) | Reading each DJ's status by your event ID, and refreshing while a DJ still has to answer |
+| return | [`app/return/page.tsx`](app/return/page.tsx) | The page Gelatin sends the organizer back to |
+
+Every request and response shape is a named, commented type in the SDK's [`src/types.ts`](../../src/types.ts).
 
 Rules the code follows that your site should too:
 
@@ -87,6 +98,8 @@ These parts exist only so the example runs on its own. Use your platform's own v
 
 - **The password page** stands in for your own sign-in.
 - **The bookings list lives in a signed cookie** in one browser, because the example has no database. Store the IDs from `submitBookingRequests` (your event ID, each `request_id` and the organizer ID) with your own event.
+- **The step pages keep the draft in this browser tab** (`sessionStorage`, `lib/draft.ts`). Yours would keep it wherever your event form does.
+- **The testing guide and "Fill with sample details"** are for testers only.
 - **IDs come from a random value per form.** Yours should come from your database.
 - **The fee form takes whole dollars**, and DJs per booking are capped at five so the cookie stays small.
 

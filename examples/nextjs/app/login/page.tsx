@@ -14,7 +14,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         <form className="panel-body" action="/api/login" method="post">
           <div>
             <h1 id="login-title" style={{ fontSize: 18 }}>Sign in to the demo</h1>
-            <p className="subtle">This example partner creates booking requests in Gelatin's sandbox. Use the DEMO_ACCESS_PASSWORD from your environment.</p>
+            <p className="subtle">This demo partner creates booking requests in Gelatin&apos;s sandbox. Use the DEMO_ACCESS_PASSWORD it was set up with, or ask the Gelatin team.</p>
           </div>
           {message && <p className="notice notice-error" role="alert">{message}</p>}
           <label className="field">
