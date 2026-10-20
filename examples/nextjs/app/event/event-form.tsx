@@ -27,7 +27,7 @@ export default function EventForm() {
         <Link className="link-button" href={`/?date=${draft.date}`}>Change date or DJs</Link>
       </div>
       <div className="autofill">
-        <span className="hint">Testing? Fill the event name and venue with made-up details.</span>
+        <span className="hint">Testing? Fill the event name, venue and address with made-up details.</span>
         <button className="button-secondary button-small" type="button" onClick={() => setDraft({ ...draft, ...sampleEventDetails() })}>
           Fill with sample details
         </button>
@@ -35,6 +35,8 @@ export default function EventForm() {
       <div className="form-grid">
         <label className="field full">Event name<input required maxLength={120} value={draft.eventName} onChange={(e) => update("eventName", e.target.value)} /></label>
         <label className="field full">Venue<input required maxLength={120} value={draft.venueName} onChange={(e) => update("venueName", e.target.value)} /></label>
+        <label className="field full">Venue address<input required maxLength={200} autoComplete="street-address" placeholder="Street, city, state and ZIP" value={draft.venueAddress} onChange={(e) => update("venueAddress", e.target.value)} /></label>
+        <p className="hint full">Gelatin shows the address to the DJ so they know where to go.</p>
         <label className="field">Starts<input required type="time" value={draft.startTime} onChange={(e) => update("startTime", e.target.value)} /></label>
         <label className="field">Ends<input required type="time" value={draft.endTime} onChange={(e) => update("endTime", e.target.value)} /></label>
         <label className="field full">Time zone

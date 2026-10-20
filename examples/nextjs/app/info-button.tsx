@@ -63,7 +63,7 @@ export default function InfoButton({ djAccess = null }: { djAccess?: DjAccess | 
           <h3 className="eyebrow">The steps</h3>
           <ol className="modal-list">
             <li><strong>Date &amp; DJs:</strong> pick the night first; only DJs free that night can be added.</li>
-            <li><strong>Event:</strong> &quot;Fill with sample details&quot; puts in a made-up event name and venue. Use an organizer email you can read: Gelatin sends the payment and booking emails there.</li>
+            <li><strong>Event:</strong> &quot;Fill with sample details&quot; puts in a made-up event name, venue and address. The DJ sees the address in Gelatin. Use an organizer email you can read: Gelatin sends the payment and booking emails there.</li>
             <li><strong>Offer:</strong> a fee per DJ from $50. Gelatin adds its $7 service fee and card processing.</li>
             <li><strong>Pay:</strong> &quot;Pay now&quot; opens Stripe&apos;s checkout on this page. The card is only held; it&apos;s charged when the DJ accepts.</li>
           </ol>

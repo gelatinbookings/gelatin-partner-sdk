@@ -47,7 +47,7 @@ export default function OfferForm() {
     <form className="stack" onSubmit={send}>
       <section className="panel panel-body stack" aria-label="Event">
         <div className="summary-line">
-          <span><strong>{draft.eventName}</strong> <span className="hint">at {draft.venueName}</span></span>
+          <span><strong>{draft.eventName}</strong> <span className="hint">at {draft.venueName}{draft.venueAddress ? `, ${draft.venueAddress}` : ""}</span></span>
           <Link className="link-button" href="/event">Edit</Link>
         </div>
         <p className="hint">{longDate(draft.date)} · {draft.startTime}–{draft.endTime} ({draft.timeZone.replace("_", " ")}) · {draft.organizerName}, {draft.email}</p>

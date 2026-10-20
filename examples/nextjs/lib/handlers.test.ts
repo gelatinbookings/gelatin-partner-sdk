@@ -46,7 +46,7 @@ function post(path: string, body: unknown, headers: Record<string, string> = {})
 }
 
 const form = {
-  nonce: "0b6f8f4e-8a43-4b8a-9d55-5c5f1c1e2a10", event_name: "Community Friday", venue_name: "The Loft",
+  nonce: "0b6f8f4e-8a43-4b8a-9d55-5c5f1c1e2a10", event_name: "Community Friday", venue_name: "The Loft", venue_address: "12 Example St, Atlanta, GA 30309",
   date: "2030-11-15", start_time: "21:00", end_time: "23:30", time_zone: "America/New_York",
   organizer_email: "organizer@example.test", organizer_name: "Taylor",
   djs: [{ id: DJ_ID, name: "DJ One", fee_dollars: 450 }],

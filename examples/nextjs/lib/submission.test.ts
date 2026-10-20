@@ -6,6 +6,7 @@ const form = demoBookingFormSchema.parse({
   nonce: "0b6f8f4e-8a43-4b8a-9d55-5c5f1c1e2a10",
   event_name: "Community Friday",
   venue_name: "The Loft",
+  venue_address: "12 Example St, Atlanta, GA 30309",
   date: "2030-11-15",
   start_time: "21:00",
   end_time: "01:00",
@@ -19,6 +20,12 @@ const form = demoBookingFormSchema.parse({
 });
 
 describe("demo booking packet", () => {
+  it("sends the venue's address so Gelatin can show the DJ where to go", () => {
+    expect(buildSubmission(form, "https://partner-demo.staging.gelatinbookings.com").submission.event.venue_address).toBe("12 Example St, Atlanta, GA 30309");
+    const { venue_address: _omitted, ...withoutAddress } = demoBookingFormSchema.parse(form);
+    expect(demoBookingFormSchema.safeParse(withoutAddress).success).toBe(false);
+  });
+
   it("converts local wall-clock times to offset timestamps across daylight-saving rules", () => {
     expect(zonedIso("2030-07-04", "20:00", "America/New_York")).toBe("2030-07-04T20:00:00-04:00");
     expect(zonedIso("2030-01-04", "20:00", "America/New_York")).toBe("2030-01-04T20:00:00-05:00");
