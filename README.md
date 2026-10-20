@@ -15,7 +15,7 @@ Gelatin books DJs for events. A **partner** is a company with its own events web
 
 1. Your website shows a list of Gelatin DJs.
 2. The organizer picks DJs and suggests a fee. Your server sends that to Gelatin as a booking request.
-3. Your website sends the organizer to a **Gelatin booking page** with your logo on it. There they review the offer, negotiate if the DJ counters, and place a card hold. No money moves yet.
+3. The organizer places a card hold for each DJ **on your page**, in Stripe's checkout form that Gelatin provides. No money moves yet. If a DJ comes back with a different price, your website sends the organizer to a **Gelatin booking page** with your logo on it to review it.
 4. The organizer comes back to your website.
 5. When the DJ accepts, Gelatin takes the payment. Your server asks Gelatin for each booking's status whenever it wants to show it.
 
@@ -31,7 +31,7 @@ Not using JavaScript? Every call is a plain HTTPS request with JSON, described i
 ## Install
 
 ```sh
-npm install github:gelatinbookings/gelatin-partner-sdk#v0.1.0-alpha.1
+npm install github:gelatinbookings/gelatin-partner-sdk#v0.1.0-alpha.2
 ```
 
 Requires Node.js 20 or later. The package builds itself on install.
@@ -55,7 +55,7 @@ const gelatin = createPartnerClient({
 });
 ```
 
-## The journey in four calls
+## The journey in five calls
 
 ```ts
 // 1. List DJs. Pass the event date to get availability.
@@ -77,11 +77,19 @@ const booking = await gelatin.submitBookingRequests({
   requests: [
     { external_request_id: "req_1", dj_id: page.items[0].id, initial_offer: { currency: "usd", dj_fee_cents: 30000 } },
   ],
-  authorization_placement: "gelatin_portal_handoff",
+  authorization_placement: "partner_event_flow", // your page takes the first card hold
   return_url: "https://your-site.example/events/event_123",
 });
 
-// 3. Send the organizer to Gelatin to negotiate and pay.
+// 3. Take the card hold on your page: give these two values to the organizer's browser,
+//    which mounts Stripe's checkout with them (see "Paying on your page").
+const { client_secret, publishable_key } = await gelatin.createPaymentSession({
+  external_event_id: "event_123",
+  external_user_id: "user_7",
+  resource: { kind: "request", id: booking.engagements[0].request_id },
+});
+
+// 4. A DJ's counteroffer is reviewed in Gelatin: send the organizer there.
 const launch = await gelatin.createPortalLaunch({
   external_event_id: "event_123",
   external_user_id: "user_7",
@@ -91,7 +99,7 @@ const launch = await gelatin.createPortalLaunch({
 // Redirect immediately: the link works once and expires in 60 seconds.
 redirect(launch.url);
 
-// 4. Read status whenever you need it, by your own event ID.
+// 5. Read status whenever you need it, by your own event ID.
 const status = await gelatin.getEventBookings("event_123");
 ```
 
@@ -101,12 +109,34 @@ For a complete website, see the [Next.js partner example](examples/nextjs/README
 
 Gelatin never calls your server. Status is pull-only: read it when the organizer comes back, when they open the event, or on a schedule. Pass `{ ifNoneMatch: lastEtag }` to skip unchanged reads: the result is `{ modified: false }` until something changes, then `{ modified: true, etag, data }`.
 
+## Paying on your page
+
+`createPaymentSession` answers `{ client_secret, publishable_key, total_cents, currency }` for the organizer's own request. Send `client_secret` and `publishable_key` to that organizer's browser only (never log them), and mount Stripe's checkout with [`@stripe/stripe-js`](https://www.npmjs.com/package/@stripe/stripe-js):
+
+```ts
+import { loadStripe } from "@stripe/stripe-js";
+
+const stripe = await loadStripe(publishableKey);
+const checkout = await stripe!.createEmbeddedCheckoutPage({
+  fetchClientSecret: async () => clientSecret,
+  onComplete: () => showConfirming(), // then re-read status from your server
+});
+checkout.mount("#gelatin-checkout");
+// Call checkout.destroy() before mounting another: Stripe allows one per page.
+```
+
+- Card details go straight to Stripe. The form shows the DJ fee, Gelatin's service fee and card processing, and names Gelatin as the seller.
+- Finishing the form doesn't place the hold by itself. Gelatin records the hold when Stripe confirms it, usually within seconds, and `getEventBookings` then shows `requested` instead of `authorization_required`.
+- It only works for the offer the organizer submitted. For a DJ's counteroffer the call answers `409 portal_required`: create a portal launch and send the organizer to Gelatin.
+- If your site sets a Content Security Policy, allow Stripe's [documented sources](https://docs.stripe.com/security/guide#content-security-policy).
+
 ## Idempotency and retries
 
 | Call | Default `Idempotency-Key` | Why it's safe |
 | --- | --- | --- |
 | `submitBookingRequests` | `booking:<external_booking_id>` | Each external booking ID is accepted once. A resend with the same body returns the original result; a different body gets `409 conflict`. |
 | `createPortalLaunch` | a fresh random key per call | Every click needs its own one-use link. Retries of that call reuse its key. |
+| `createPaymentSession` | a fresh random key per call | Gelatin keeps one open hold per offer and returns it whichever key asks, so a second click gets the same checkout. |
 
 Pass `{ idempotencyKey }` to use your own. `idempotencyKeyFor("booking", id)` joins IDs safely: it escapes each part and rejects blank parts, line breaks and keys over 255 characters.
 
@@ -128,7 +158,8 @@ Failed calls throw `PartnerApiError` with `status`, a safe `code` and the `reque
 | 404 | `resource_unavailable` | The launch target doesn't exist for your partner |
 | 409 | `dj_unavailable` | A DJ can't take the event; `externalRequestId` names the request. Nothing in the submission was saved. |
 | 409 | `conflict`, `idempotency_conflict` | An ID or key was reused with different content |
-| 422 | `unsupported_authorization_placement` | Use `gelatin_portal_handoff` |
+| 409 | `portal_required` | `createPaymentSession` on a DJ's counteroffer: send the organizer to Gelatin with a portal launch |
+| 409 | `offer_changed` | The offer changed, was already paid or expired; read status |
 | 429 | `rate_limited` | Retried automatically after `Retry-After` |
 | 503 | `temporarily_unavailable` | Retried automatically |
 

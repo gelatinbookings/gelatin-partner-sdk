@@ -250,6 +250,31 @@ describe("partner server client", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
+  it("creates a payment session for the page to mount, under a fresh key per call", async () => {
+    const body = { client_secret: "cs_test_a1_secret_b2", publishable_key: "pk_test_c3", total_cents: 11051, currency: "usd" };
+    const fetcher = vi.fn(async () => Response.json(body, { status: 201 })) as unknown as typeof fetch;
+    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/memberly", apiKey: "gel_test_private", fetch: fetcher });
+    const input = { external_event_id: "event_123", external_user_id: "user_789", resource: { kind: "request" as const, id: "33333333-3333-4333-8333-333333333333" } };
+
+    expect(await client.createPaymentSession(input)).toEqual(body);
+    await client.createPaymentSession(input);
+
+    const calls = (fetcher as unknown as ReturnType<typeof vi.fn>).mock.calls as Array<[string, RequestInit]>;
+    expect(new URL(calls[0][0]).pathname).toBe("/v1/partners/memberly/payment-sessions");
+    expect(JSON.parse(String(calls[0][1].body))).toEqual(input);
+    const keys = calls.map(([, init]) => new Headers(init.headers).get("Idempotency-Key"));
+    expect(keys[0]).toBeTruthy();
+    expect(keys[0]).not.toBe(keys[1]);
+  });
+
+  it("rejects a payment session answer that isn't a client secret and publishable key", async () => {
+    const client = createPartnerClient({
+      baseUrl: "https://api.gelatin.example/v1/partners/memberly", apiKey: "gel_test_private",
+      fetch: mockFetch(Response.json({ client_secret: "cs_test_a1_secret_b2", total_cents: 11051, currency: "usd" }, { status: 201 })),
+    });
+    await expect(client.createPaymentSession({ external_event_id: "e", external_user_id: "u", resource: { kind: "request", id: "33333333-3333-4333-8333-333333333333" } })).rejects.toMatchObject({ code: "invalid_response" });
+  });
+
   it("creates a portal launch on the mounted route", async () => {
     const fetcher = mockFetch(Response.json({ url: "https://book.acme.example/partner/launch#token=opaque", expires_at: "2026-10-12T18:00:00Z" }, { status: 201 }));
     const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: fetcher });

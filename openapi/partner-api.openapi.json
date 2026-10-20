@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Gelatin Partner DJ Booking API",
-    "version": "0.1.0-alpha.1",
+    "version": "0.1.0-alpha.2",
     "description": "Partner-scoped HTTP API for listing Gelatin DJs, submitting booking requests, handing organizers to Gelatin's hosted booking page, and reading booking status. Pre-release: the contract may change before 1.0."
   },
   "x-contract-status": "pre-release",
@@ -710,7 +710,7 @@
     "/v1/partners/{partner}/booking-requests": {
       "post": {
         "summary": "Submit one partner booking with one or more DJ requests (mounted)",
-        "description": "Requires `requests:write`. Body at most 64 KiB. Only `gelatin_portal_handoff` is accepted; `partner_event_flow` returns 422 `unsupported_authorization_placement`. `return_url` must use an origin Gelatin registered for the partner. The organizer then authorizes payment through a portal launch.",
+        "description": "Requires `requests:write`. Body at most 64 KiB. `authorization_placement` is `partner_event_flow` when your page takes the first card hold with `POST /payment-sessions`, or `gelatin_portal_handoff` when the organizer pays in Gelatin through a portal launch. Both can still use the portal, which is where a DJ's counteroffer is reviewed. `return_url` must use an origin Gelatin registered for the partner. The organizer then authorizes payment through a portal launch.",
         "operationId": "submitBookingRequests",
         "security": [
           {
@@ -814,16 +814,6 @@
                       }
                     }
                   }
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "`unsupported_authorization_placement`: only `gelatin_portal_handoff` is available; in-flow payment is not built yet.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
                 }
               }
             }
@@ -939,6 +929,112 @@
           },
           "503": {
             "description": "`temporarily_unavailable` with `Retry-After: 30`: retry with the same `Idempotency-Key` and body; you get the same link back.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/partners/{partner}/payment-sessions": {
+      "post": {
+        "summary": "Start or resume the card hold for an organizer's initial offer on your page (mounted)",
+        "description": "Requires `launch:write`. The request must belong to the same partner, external event and external organizer, and its current offer must be the one the organizer submitted; a DJ's counteroffer returns 409 `portal_required` and is reviewed in Gelatin through a portal launch. Returns an embedded Stripe Checkout for the organizer's browser to mount with Stripe.js (`createEmbeddedCheckoutPage`) using `publishable_key`. The client secret opens only this checkout; send it to that organizer's browser only and never log it. Card details go to Stripe directly. Completing the checkout does not by itself place the hold: read booking status, which changes once Stripe confirms the hold to Gelatin. One open hold exists per offer: any key, and the Gelatin portal, resume the same checkout.",
+        "operationId": "createPaymentSession",
+        "security": [
+          {
+            "PartnerBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "partner",
+            "in": "path",
+            "required": true,
+            "description": "Partner slug; the bearer key must be scoped to this same partner.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Key for this call; a retry with the same key and body returns the same checkout. A fresh key per click is fine: Gelatin resumes the open hold for the offer.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentSessionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The checkout to mount",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentSessionResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`: the body is invalid or over 2 KiB, has unknown fields, or the `Idempotency-Key` header is missing, padded or longer than 255 characters.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "description": "`resource_unavailable`: no request with that id belongs to this partner, event and organizer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`portal_required`: the current offer is a DJ's counteroffer, or its hold was started on a Stripe-hosted page; create a portal launch. `offer_changed`: the offer changed, was already authorized or has expired; read booking status. `dj_unavailable`: the DJ can no longer take this booking.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "description": "`temporarily_unavailable` with `Retry-After: 30`: retry; you get the same open checkout back.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1814,6 +1910,79 @@
             "items": {
               "$ref": "#/components/schemas/BookingRequestEngagement"
             }
+          }
+        }
+      },
+      "PaymentSessionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "external_event_id",
+          "external_user_id",
+          "resource"
+        ],
+        "properties": {
+          "external_event_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "external_user_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "id"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "request"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "The `request_id` from the submission result"
+              }
+            }
+          }
+        }
+      },
+      "PaymentSessionResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "client_secret",
+          "publishable_key",
+          "total_cents",
+          "currency"
+        ],
+        "properties": {
+          "client_secret": {
+            "type": "string",
+            "description": "Embedded Stripe Checkout client secret for this one hold"
+          },
+          "publishable_key": {
+            "type": "string",
+            "description": "Gelatin's Stripe publishable key for this environment (`pk_test_` in the sandbox)"
+          },
+          "total_cents": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "What the organizer authorizes: DJ fee plus Gelatin's service fee and card processing"
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "usd"
+            ]
           }
         }
       }

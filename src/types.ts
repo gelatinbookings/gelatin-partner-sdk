@@ -117,6 +117,26 @@ export interface LaunchSessionResult {
   expires_at: string;
 }
 
+/** Pay for the organizer's own initial offer on your page. A DJ's counteroffer is reviewed in Gelatin. */
+export interface PaymentSessionRequest {
+  external_event_id: string;
+  external_user_id: string;
+  resource: { kind: "request"; id: string };
+}
+
+/**
+ * Mount it in the browser with Stripe.js:
+ * `(await loadStripe(publishable_key)).createEmbeddedCheckoutPage({ fetchClientSecret: async () => client_secret })`.
+ * The client secret opens only this one checkout; pass it to the organizer's browser and nowhere else.
+ */
+export interface PaymentSessionResult {
+  client_secret: string;
+  publishable_key: string;
+  /** What the organizer authorizes: DJ fee plus Gelatin's service fee and card processing. */
+  total_cents: number;
+  currency: string;
+}
+
 export interface EventBookingProjection {
   external_event_id: string;
   revision: number;

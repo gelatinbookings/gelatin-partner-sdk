@@ -18,6 +18,7 @@ describe("public partner contract", () => {
       "/v1/partners/{partner}/events/{external_event_id}/attendance",
       "/v1/partners/{partner}/events/{external_event_id}/dj-bookings",
       "/v1/partners/{partner}/launch-sessions",
+      "/v1/partners/{partner}/payment-sessions",
       "/v1/partners/{partner}/portal-launches",
     ].sort());
     const ids = new Set<string>();
@@ -33,7 +34,7 @@ describe("public partner contract", () => {
         }
       }
     }
-    expect(ids.size).toBe(8);
+    expect(ids.size).toBe(9);
   });
 
   it("has no unresolved component references or bundled runtime dependencies", () => {
@@ -107,12 +108,18 @@ describe("public partner contract", () => {
     expect(submit.operationId).toBe("submitBookingRequests");
     expect(submit.requestBody.content["application/json"].schema.$ref).toBe("#/components/schemas/DjRequestSubmission");
     expect(submit.responses["201"].content?.["application/json"].schema.$ref).toBe("#/components/schemas/BookingRequestResult");
-    expect(submit.responses["422"]).toBeDefined();
+    // Both placements are accepted now, so submission has no 422.
+    expect(submit.responses["422"]).toBeUndefined();
     const launch = paths["/v1/partners/{partner}/portal-launches"].post;
     expect(launch.operationId).toBe("createPortalLaunch");
     expect(launch.requestBody.content["application/json"].schema.$ref).toBe("#/components/schemas/LaunchSessionRequest");
     expect(launch.responses["201"].content?.["application/json"].schema.$ref).toBe("#/components/schemas/LaunchSessionResult");
+    const payment = paths["/v1/partners/{partner}/payment-sessions"].post;
+    expect(payment.operationId).toBe("createPaymentSession");
+    expect(payment.requestBody.content["application/json"].schema.$ref).toBe("#/components/schemas/PaymentSessionRequest");
+    expect(payment.responses["201"].content?.["application/json"].schema.$ref).toBe("#/components/schemas/PaymentSessionResult");
     const schemas = (spec.components as { schemas: Record<string, { required?: string[] }> }).schemas;
+    expect(schemas.PaymentSessionResult.required).toEqual(["client_secret", "publishable_key", "total_cents", "currency"]);
     expect(schemas.BookingRequestResult.required).toEqual(["group_id", "event_id", "engagements"]);
     expect(schemas.BookingRequestEngagement.required).toEqual(expect.arrayContaining(["request_id", "booking_id", "total_cents", "currency"]));
   });

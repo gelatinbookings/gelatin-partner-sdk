@@ -12,6 +12,8 @@ import type {
   EventChangeResult,
   LaunchSessionRequest,
   LaunchSessionResult,
+  PaymentSessionRequest,
+  PaymentSessionResult,
   PartnerBookingStatus,
   PublicDj,
   SubmissionResult,
@@ -178,6 +180,16 @@ function bookingRequestResult(value: unknown): BookingRequestResult {
 function launchResult(value: unknown): LaunchSessionResult {
   const body = object(value);
   return { url: string(body.url), expires_at: string(body.expires_at) };
+}
+
+function paymentSessionResult(value: unknown): PaymentSessionResult {
+  const body = object(value);
+  return {
+    client_secret: string(body.client_secret),
+    publishable_key: string(body.publishable_key),
+    total_cents: integer(body.total_cents),
+    currency: string(body.currency),
+  };
 }
 
 function eventBookings(value: unknown): EventBookingProjection {
@@ -398,9 +410,11 @@ export function createPartnerClient(options: PartnerClientOptions) {
       return json(await request(path, "GET", undefined, options), catalog);
     },
     /**
-     * Mounted route. Only `gelatin_portal_handoff` placement is accepted. The
-     * key defaults to `booking:<external_booking_id>`: Gelatin accepts each
-     * external booking ID once, so a resend returns the original result.
+     * Mounted route. Use `partner_event_flow` placement when your page takes the
+     * first card hold (`createPaymentSession`), or `gelatin_portal_handoff` to
+     * send the organizer to Gelatin. The key defaults to
+     * `booking:<external_booking_id>`: Gelatin accepts each external booking ID
+     * once, so a resend returns the original result.
      */
     async submitBookingRequests(input: DjRequestSubmission, options: DefaultedWriteOptions = {}): Promise<BookingRequestResult> {
       const idempotencyKey = options.idempotencyKey ?? `booking:${input.external_booking_id}`;
@@ -414,6 +428,17 @@ export function createPartnerClient(options: PartnerClientOptions) {
     async createPortalLaunch(input: LaunchSessionRequest, options: DefaultedWriteOptions = {}): Promise<LaunchSessionResult> {
       const idempotencyKey = options.idempotencyKey ?? randomKey();
       return json(await request("portal-launches", "POST", input, { ...options, idempotencyKey }), launchResult);
+    },
+    /**
+     * Mounted route. Starts, or resumes, the card hold for the organizer's
+     * initial offer as an embedded Stripe checkout your page mounts. The key
+     * defaults to a fresh UUID per call: Gelatin resumes the same open hold
+     * whichever key asks. A DJ's counteroffer answers `409 portal_required`;
+     * create a portal launch instead.
+     */
+    async createPaymentSession(input: PaymentSessionRequest, options: DefaultedWriteOptions = {}): Promise<PaymentSessionResult> {
+      const idempotencyKey = options.idempotencyKey ?? randomKey();
+      return json(await request("payment-sessions", "POST", input, { ...options, idempotencyKey }), paymentSessionResult);
     },
     /** Proposed alpha route; not mounted. Use `submitBookingRequests`. */
     async submitDjRequests(input: DjRequestSubmission, options: WriteOptions): Promise<SubmissionResult> {
