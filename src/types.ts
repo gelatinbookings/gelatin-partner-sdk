@@ -100,6 +100,8 @@ export interface EventDetails {
   /** IANA time zone for the event's local calendar and display, for example `"America/New_York"`. */
   time_zone: string;
   venue_name: string;
+  /** Optional street address. Gelatin shows it to the DJ so they know where to go. */
+  venue_address?: string;
 }
 
 /** The organizer's first offer to one DJ. */

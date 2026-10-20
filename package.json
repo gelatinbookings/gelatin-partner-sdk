@@ -1,6 +1,6 @@
 {
   "name": "@gelatinbookings/partner-sdk",
-  "version": "0.1.0-alpha.3",
+  "version": "0.1.0-alpha.4",
   "description": "Typed, dependency-free client for Gelatin's partner booking API",
   "license": "MIT",
   "type": "module",

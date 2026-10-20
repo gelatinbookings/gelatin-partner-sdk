@@ -1285,6 +1285,12 @@
           },
           "venue_name": {
             "type": "string"
+          },
+          "venue_address": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Optional street address of the venue. Gelatin shows it to the DJ in their invitation, inbox and booking page."
           }
         }
       },
