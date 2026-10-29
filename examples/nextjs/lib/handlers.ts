@@ -389,7 +389,7 @@ export const defaultDeps: HandlerDeps = {
 const tierSchema = z.enum(["full", "light"]);
 
 /**
- * POST /api/tier: the header's Light / Full switch (GEL-917). Only for a
+ * POST /api/tier: the header's Light / Full switch. Only for a
  * signed-in browser on this site. The choice is a cookie so the step pages,
  * rendered on the server, can show the matching tier.
  */

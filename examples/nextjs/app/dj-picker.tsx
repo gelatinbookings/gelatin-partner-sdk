@@ -33,7 +33,7 @@ export default function DjPicker({ date, suggestedDate, city, cityChosen, budget
   genres: DirectoryGenre[] | null;
   /** A genre in the URL that the URL city's DJs don't list, so it was not applied. */
   droppedGenre: string | null;
-  /** The Light tier (GEL-917): a city and a DJ, with none of the Full extras. */
+  /** The Light tier: a city and a DJ, with none of the Full extras. */
   light?: boolean;
   djs: CatalogDj[];
   nextHref: string | null;

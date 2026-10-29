@@ -50,7 +50,7 @@ export default function BookingList({ bookings, highlight, statuses = {}, altern
   statuses?: Record<string, PartnerBookingStatus>;
   /** Gelatin's alternates for each lost request, by request ID. */
   alternates?: Record<string, DjAlternates>;
-  /** Light (GEL-917): one "Manage in Gelatin" per DJ, and no public event page. */
+  /** Light: one "Manage in Gelatin" per DJ, and no public event page. */
   light?: boolean;
 }) {
   if (bookings.length === 0) {

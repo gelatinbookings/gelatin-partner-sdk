@@ -96,6 +96,10 @@ Rules the code follows that your site should too:
 - **Trust status, not the browser.** When Stripe's form finishes, show "confirming" and read status; the hold counts once Gelatin reports `requested`.
 - **Read status when you show it.** Gelatin does not call your server. Read status when the organizer returns, when they open the event, or on a schedule.
 
+### Kept in step with Gelatin's demo
+
+`app/` and `lib/` are the same code Gelatin runs as its own demo partner, so what you read here is what Gelatin tests. The only differences are comments and test titles: Gelatin's copy names its internal ticket for the Light / Full switch (in `app/page.tsx`, `app/layout.tsx`, `app/dj-picker.tsx`, `app/booking-list.tsx`, `app/bookings/page.tsx`, `app/offer/offer-form.tsx`, `app/globals.css`, `lib/tier.ts`, `lib/handlers.ts` and the titles in `lib/tier.test.ts` and `lib/handlers.test.ts`), which this copy leaves out.
+
 ## What is example scaffolding
 
 These parts exist only so the example runs on its own. Use your platform's own versions instead:

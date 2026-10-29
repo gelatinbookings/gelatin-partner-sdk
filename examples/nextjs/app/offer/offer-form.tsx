@@ -48,7 +48,7 @@ export default function OfferForm() {
         showTaken();
         return;
       }
-      // Full goes to this site's bookings list; Light (GEL-917) straight to Gelatin's portal,
+      // Full goes to this site's bookings list; Light straight to Gelatin's portal,
       // on an address the demo server already checked against GELATIN_PORTAL_ORIGINS.
       const portal = body.next?.startsWith("https://") || body.next?.startsWith("http://");
       if (!response.ok || !(body.next?.startsWith("/bookings") || portal)) {

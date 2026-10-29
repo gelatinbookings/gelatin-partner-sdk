@@ -15,7 +15,7 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
   const gelatin = gelatinClient(config);
   const statuses = await readRequestStatuses(gelatin, bookings);
   // A DJ who passed, or an offer that expired, leaves a slot; Gelatin says who else is open for it.
-  // Light partners leave this to Gelatin's portal (GEL-917).
+  // Light partners leave this to Gelatin's portal.
   const alternates = light ? {} : await readAlternates(gelatin, bookings, statuses);
   const { event } = await searchParams;
   const highlight = typeof event === "string" && bookings.some((booking) => booking.eventId === event) ? event : null;

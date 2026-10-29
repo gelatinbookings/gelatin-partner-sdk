@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseTier, placementFor } from "./tier";
 
-describe("demo integration tier (GEL-917)", () => {
+describe("demo integration tier", () => {
   it("is Full unless Light was chosen, so an old or odd cookie shows the full demo", () => {
     expect(parseTier("light")).toBe("light");
     expect(parseTier("full")).toBe("full");

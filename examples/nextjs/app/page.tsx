@@ -27,7 +27,7 @@ export default async function DatePage({ searchParams }: { searchParams: Promise
   const light = tier === "light";
   const raw = await searchParams;
   const query = querySchema.parse({ city: raw.city, genre: raw.genre, date: raw.date, cursor: raw.cursor });
-  // Light (GEL-917) is a typed city and a DJ: no directory, genre or budget.
+  // Light is a typed city and a DJ: no directory, genre or budget.
   const budget = light ? [] : budgetFromSearch(raw.budget);
 
   const gelatin = gelatinClient(config);

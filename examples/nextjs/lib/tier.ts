@@ -1,6 +1,6 @@
 /**
- * The demo shows both integration tiers (GEL-917; see the Gelatin repo's
- * docs/partner-integration-tiers.md). Full is everything a partner can build;
+ * The demo shows both integration tiers (see Gelatin's partner
+ * integration tiers). Full is everything a partner can build;
  * Light is the minimum: pick a DJ, send the request, and let Gelatin's portal
  * take the card hold and everything after it.
  */

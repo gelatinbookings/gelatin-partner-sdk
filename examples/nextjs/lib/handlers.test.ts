@@ -391,7 +391,7 @@ describe("Gelatin error wording", () => {
   });
 });
 
-describe("Light / Full tier (GEL-917)", () => {
+describe("Light / Full tier", () => {
   const tierPost = (tier: string, headers: Record<string, string> = {}) =>
     new Request(`${ORIGIN}/api/tier`, { method: "POST", headers: { origin: ORIGIN, ...headers }, body: new URLSearchParams({ tier }) });
   const engagement = { id: "x", external_request_id: "r", dj_id: DJ_ID, request_id: REQUEST_ID, booking_id: "b", offer_id: "o", revision: 1, total_cents: 54_200, currency: "usd" };

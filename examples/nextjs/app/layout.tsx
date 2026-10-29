@@ -50,7 +50,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <span className="demo-tag" title="A demo partner site with synthetic data, booking in Gelatin's sandbox">Demo</span>
           </Link>
           {signedIn && (
-            // GEL-917: show either integration tier. Switching starts a new booking.
+            // Show either integration tier. Switching starts a new booking.
             <form className="tier-switch" action="/api/tier" method="post" aria-label="Integration tier">
               <span className="tier-label">Integration</span>
               {(["light", "full"] as const).map((option) => (
