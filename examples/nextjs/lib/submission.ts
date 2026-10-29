@@ -47,7 +47,7 @@ export function organizerIdFor(email: string) {
  * booking: the SDK's default idempotency key is `booking:<external_booking_id>`,
  * and Gelatin accepts each booking ID once.
  */
-export function buildSubmission(form: DemoBookingForm, publicOrigin: string): {
+export function buildSubmission(form: DemoBookingForm, publicOrigin: string, placement: "partner_event_flow" | "gelatin_portal_handoff" = "partner_event_flow"): {
   submission: BookingRequest;
 } {
   const interval = eventInterval(form.date, form.start_time, form.end_time, form.time_zone);
@@ -97,9 +97,10 @@ export function buildSubmission(form: DemoBookingForm, publicOrigin: string): {
       organizer,
       event,
       requests,
-      // This site takes the first card hold on its own page (`createPaymentSession`).
-      // A DJ's counteroffer is reviewed in Gelatin (`createPortalLaunch`).
-      authorization_placement: "partner_event_flow",
+      // Full: this site takes the first card hold on its own page (`createPaymentSession`),
+      // and a DJ's counteroffer is reviewed in Gelatin (`createPortalLaunch`).
+      // Light: Gelatin's portal takes the hold too, so this site needs no payment code.
+      authorization_placement: placement,
       return_url: returnUrl.toString(),
     },
   };

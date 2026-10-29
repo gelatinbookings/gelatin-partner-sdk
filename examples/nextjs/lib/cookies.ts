@@ -13,7 +13,18 @@ export type DemoBooking = {
   /** External organizer ID used for the submission; launches must reuse it. */
   organizerId: string;
   engagements: Array<{ requestId: string; djName: string; totalCents: number; currency: string }>;
+  /** What this site told Gelatin about the event, for its own public event page. Absent on older cookies. */
+  event?: DemoEventDetails;
 };
+
+export type DemoEventDetails = { startsAt: string; endsAt: string; timeZone: string; venueName: string; venueAddress?: string };
+
+function isEventDetails(value: unknown): value is DemoEventDetails {
+  if (!value || typeof value !== "object") return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.startsAt === "string" && typeof row.endsAt === "string" && typeof row.timeZone === "string"
+    && typeof row.venueName === "string" && (row.venueAddress === undefined || typeof row.venueAddress === "string");
+}
 
 function secure(config: DemoConfig) {
   return config.publicOrigin.startsWith("https:");
@@ -22,7 +33,7 @@ function secure(config: DemoConfig) {
 /** `__Host-` binds the cookie to this exact host over HTTPS; loopback HTTP cannot use it. */
 export function cookieNames(config: DemoConfig) {
   const prefix = secure(config) ? "__Host-" : "";
-  return { session: `${prefix}partner_demo_session`, bookings: `${prefix}partner_demo_bookings` };
+  return { session: `${prefix}partner_demo_session`, bookings: `${prefix}partner_demo_bookings`, tier: `${prefix}partner_demo_tier` };
 }
 
 export function serializeCookie(config: DemoConfig, name: string, value: string, maxAgeSeconds: number) {
@@ -63,6 +74,7 @@ function isBooking(value: unknown): value is DemoBooking {
   const row = value as Record<string, unknown>;
   return typeof row.eventId === "string" && typeof row.eventName === "string"
     && typeof row.createdAt === "string" && typeof row.organizerId === "string"
+    && (row.event === undefined || isEventDetails(row.event))
     && Array.isArray(row.engagements) && row.engagements.every((item) => {
       const engagement = item as Record<string, unknown>;
       return engagement && typeof engagement.requestId === "string" && typeof engagement.djName === "string"

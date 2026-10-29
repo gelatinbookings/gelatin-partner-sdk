@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Gelatin Partner DJ Booking API",
-    "version": "0.1.0-alpha.2",
+    "version": "0.1.0-alpha.5",
     "description": "Partner-scoped HTTP API for listing Gelatin DJs, submitting booking requests, handing organizers to Gelatin's hosted booking page, and reading booking status. Pre-release: the contract may change before 1.0."
   },
   "x-contract-status": "pre-release",
@@ -44,7 +44,17 @@
             "schema": {
               "type": "string"
             },
-            "description": "Exact case-insensitive city match; surrounding whitespace is ignored."
+            "description": "City, with or without its US state: \"Atlanta, GA\", \"Atlanta\" and \"Atlanta, Georgia\" return the same DJs. Use a label from listPartnerCities. Returns DJs whose profile names that city, plus, for a city in the SDK's US_MAJOR_CITIES, DJs whose service radius covers it. Case and surrounding whitespace are ignored. This is the default city rule; Gelatin can set a partner to exact-name matching, which returns only DJs whose profile city is exactly the query text (case and surrounding whitespace still ignored), with no aliases or service radius."
+          },
+          {
+            "name": "genre",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 60
+            },
+            "description": "One genre from the DJ's profile. Case, accents, whitespace and punctuation are ignored, so \"Deep-House\" and \"deep house\" return the same DJs; there is no synonym list. Use a name from listPartnerGenres. A genre no DJ lists returns an empty page, not an error. Text with no letters or digits is rejected."
           },
           {
             "name": "date",
@@ -56,12 +66,22 @@
             "description": "Calendar date for advisory availability. When omitted, available is false."
           },
           {
+            "name": "budget",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^(under_300|300_to_600|600_to_1000|1000_plus)(,(under_300|300_to_600|600_to_1000|1000_plus)){0,3}$"
+            },
+            "example": "300_to_600,600_to_1000",
+            "description": "Budget bands, comma-separated, each at most once: under_300 (below $300), 300_to_600 ($300 up to but not including $600), 600_to_1000 ($600 up to but not including $1,000), 1000_plus ($1,000 and up). Lower bounds are inclusive, so $300 exactly is in 300_to_600, $600 in 600_to_1000 and $1,000 in 1000_plus. Returns DJs whose real minimum rate is in any listed band, including DJs who keep their rate private; their published_rate_cents stays null and results stay ordered by ID, so a response reveals only band membership. A DJ with no rate on file is in no band. Combines with city and date: every filter must match. An unknown, empty or repeated band, or a repeated budget parameter, is rejected with 400 invalid_query. The SDK exports the bands as BUDGET_BANDS from @gelatinbookings/partner-sdk/budget."
+          },
+          {
             "name": "cursor",
             "in": "query",
             "schema": {
               "type": "string"
             },
-            "description": "Opaque keyset position bound to the authenticated partner and city/date filters. Eligibility is checked again on every page."
+            "description": "Opaque keyset position bound to the authenticated partner and city, genre, date and budget filters. Eligibility is checked again on every page."
           },
           {
             "name": "limit",
@@ -114,6 +134,236 @@
           }
         },
         "description": "Requires catalog:read. Only active DJs approved by partner distribution settings, with partner exclusions taking precedence. Only published partner-allowlisted fields; hidden rates stay null. Availability requires a date, payout readiness and no known date conflict; rechecked at each mutation. Unknown or duplicate query parameters are rejected. Responses use Cache-Control: private, no-store."
+      }
+    },
+    "/v1/partners/{partner}/cities": {
+      "get": {
+        "summary": "List US states and major cities with this partner's DJ counts",
+        "operationId": "listPartnerCities",
+        "security": [
+          {
+            "PartnerBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "partner",
+            "in": "path",
+            "required": true,
+            "description": "Partner slug; the bearer key must be scoped to this same partner.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Directory of cities grouped by country and state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CityDirectory"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Requires catalog:read. Every US state and DC with its major cities (the SDK's US_MAJOR_CITIES: U.S. Census Bureau Vintage 2024, the 200 most populous places plus each state's most populous), plus any other city a DJ in this partner's catalog names. dj_count is the number of DJs listPartnerDjs returns for that city's label, under the partner's city rule. By default that is DJs whose profile names the city, plus, for a bundled city, DJs whose service radius covers it. A partner on exact-name matching sees each stored city spelling as its own entry, counted by exact name only. It applies the same distribution settings and exclusions. Cities with no DJs stay listed with dj_count 0. No coordinates, radii or DJ identifiers are returned. Cities Gelatin cannot place in a US state are grouped under a country with a null code. Takes no query parameters; any are rejected. Responses use Cache-Control: private, no-store."
+      }
+    },
+    "/v1/partners/{partner}/city-waitlist": {
+      "post": {
+        "summary": "Ask to be told when a city has DJs (mounted)",
+        "description": "Requires `requests:write` and counts against the partner's write quota. Send it when an organizer picks a city with `dj_count: 0` and asks to be told when DJs are available there. `city` must be the `label` of a bundled US city from listPartnerCities (the SDK's US_MAJOR_CITIES); `consent` must be `true`. Gelatin stores the email lower-cased with the city, its state, the source and the time of the request, once per email, city and partner. The response never contains the email or any other sign-up. Gelatin sends no email from this route. Responses use Cache-Control: private, no-store.",
+        "operationId": "joinCityWaitlist",
+        "security": [
+          {
+            "PartnerBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "partner",
+            "in": "path",
+            "required": true,
+            "description": "Partner slug; the bearer key must be scoped to this same partner.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Required on every write. A sign-up is already one row per email and city, so a retry with any key lands on the same row.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CityWaitlistRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "`already_subscribed`: this email already asked for this city through this partner. The first consent time is kept.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CityWaitlistResult"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Signed up",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CityWaitlistResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`: the body is invalid or over 2 KiB, has unknown fields, the email is not an address of at most 254 characters, the city is not a bundled city label, `consent` is not `true`, or the `Idempotency-Key` header is missing or longer than 255 characters. `invalid_query`: the URL has query parameters. Fields are never echoed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "description": "`temporarily_unavailable` with `Retry-After: 30`: retry; a repeat lands on the same sign-up.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/partners/{partner}/genres": {
+      "get": {
+        "summary": "List the genres this partner's DJs list, with DJ counts",
+        "operationId": "listPartnerGenres",
+        "security": [
+          {
+            "PartnerBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "partner",
+            "in": "path",
+            "required": true,
+            "description": "Partner slug; the bearer key must be scoped to this same partner.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "city",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "description": "A city label from listPartnerCities. Only DJs listPartnerDjs returns for this city are counted, by the same rule (named city or service radius). Omit for every city."
+          },
+          {
+            "name": "budget",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^(under_300|300_to_600|600_to_1000|1000_plus)(,(under_300|300_to_600|600_to_1000|1000_plus)){0,3}$"
+            },
+            "example": "300_to_600,600_to_1000",
+            "description": "Same bands and format as listPartnerDjs budget. When set, only DJs in those bands are counted, so each count is what listPartnerDjs returns for that city, budget and genre."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Genres present among this partner's DJs, busiest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenreDirectory"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Requires catalog:read. The genres listed by the DJs this partner may show (same distribution settings and exclusions as listPartnerDjs), optionally in one city and budget bands. dj_count is the number of DJs listPartnerDjs returns for that city, budget and genre. Spellings that differ only in case, accents, whitespace or punctuation are one genre, named by the spelling most of its DJs use. Only genres with at least one DJ are listed, busiest first, at most 100. No DJ identifiers are returned. Accepts only the city and budget query parameters; others are rejected. Responses use Cache-Control: private, no-store."
       }
     },
     "/v1/partners/{partner}/dj-request-submissions": {
@@ -529,6 +779,181 @@
         "description": "Requires bookings:read. Mounted. Resolves the event only through the authenticated partner's own external_event_id; an unknown event and another partner's event both return the same 404. Each request reports authorization_required until a signed hold exists on its current offer; requested while the DJ considers a held offer, including acceptance awaiting a signed capture; reauthorization_required when the DJ countered or the offer changed: a counteroffer releases the earlier hold, so the organizer must approve the new total and place a new hold; negotiating is reserved for a counter open while a hold is still valid, which the current flow does not produce; confirmed only after Gelatin records the signed capture; and declined, expired or cancelled when it ends. The actions array is currently always empty: portal links are single-use, so mint one with the portal launch route when the organizer acts rather than on each read. revision stays 0 until event change submission is mounted; use the ETag for change detection. ETag and If-None-Match return 304 with no body. Responses use Cache-Control: private, no-store."
       }
     },
+    "/v1/partners/{partner}/events/{external_event_id}/dj-bookings/{request_id}/alternates": {
+      "get": {
+        "summary": "List alternates after a DJ passes, an offer expires or a request is lost",
+        "operationId": "listPartnerAlternates",
+        "security": [
+          {
+            "PartnerBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "partner",
+            "in": "path",
+            "required": true,
+            "description": "Partner slug; the bearer key must be scoped to this same partner.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "external_event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "description": "A request_id from getEventBookings or submitBookingRequests.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Who else is open for the lost slot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DjAlternates"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Requires bookings:read. Only for a request whose status is declined, expired or cancelled; a live request answers 409 request_active. Returns up to five DJs from this partner's catalog who are available on the event's own calendar date, in its city (from the venue address, else the lost DJ's city; matched by the partner's city rule, as in listPartnerDjs), and who publish a rate within the organizer's last offered DJ fee plus a fifth, or publish none. The lost DJ and every DJ already asked for this event are left out. Ordered by published rate, nearest the budget first; private rates never filter or order. Includes the partner's own event details to prefill a new request. Reading this creates no booking, hold or payment. Unknown and another partner's requests are indistinguishable (404). Takes no query parameters. Responses use Cache-Control: private, no-store."
+      }
+    },
+    "/v1/partners/{partner}/events/{external_event_id}/lineup": {
+      "get": {
+        "summary": "Read an event's public lineup",
+        "operationId": "getEventLineup",
+        "security": [
+          {
+            "PartnerBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "partner",
+            "in": "path",
+            "required": true,
+            "description": "Partner slug; the bearer key must be scoped to this same partner.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "external_event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "include",
+            "in": "query",
+            "required": false,
+            "description": "Pass pending to add DJs who have the offer and haven't settled it yet, for a TBA slot. Omit for confirmed DJs only.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending"
+              ]
+            }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current lineup",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventLineup"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Unchanged; no response body",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Requires bookings:read. Mounted. Who is playing at one of your events, safe to show on a public event page: each DJ's id, name, public profile link and photo, and nothing about price, offers or the organizer. Resolves the event only through the authenticated partner's own external_event_id; an unknown event and another partner's event both return the same 404. By default it lists only DJs whose booking is confirmed (Gelatin recorded the signed capture). include=pending also lists DJs who have the offer and haven't settled it (requested, negotiating or reauthorization_required in getEventBookings) with status pending; a request still waiting for the organizer's first card hold is never listed, because the DJ hasn't seen it. Declined, expired and cancelled bookings are simply absent. A DJ appears once per event, and a DJ removed from your catalog distribution is left out. Link the name to profile_url wherever it is shown. ETag and If-None-Match return 304 with no body. Responses use Cache-Control: private, no-store."
+      }
+    },
     "/v1/partners/{partner}/events/{external_event_id}": {
       "patch": {
         "summary": "Send a monotonic event change or cancellation",
@@ -710,7 +1135,7 @@
     "/v1/partners/{partner}/booking-requests": {
       "post": {
         "summary": "Submit one partner booking with one or more DJ requests (mounted)",
-        "description": "Requires `requests:write`. Body at most 64 KiB. `authorization_placement` is `partner_event_flow` when your page takes the first card hold with `POST /payment-sessions`, or `gelatin_portal_handoff` when the organizer pays in Gelatin through a portal launch. Both can still use the portal, which is where a DJ's counteroffer is reviewed. `return_url` must use an origin Gelatin registered for the partner. The organizer then authorizes payment through a portal launch.",
+        "description": "Requires `requests:write`. Body at most 64 KiB. `authorization_placement` is `partner_event_flow` when your page takes the first card hold with `POST /payment-sessions`, or `gelatin_portal_handoff` when the organizer pays in Gelatin through a portal launch. Both stay able to use the portal, which is where a DJ's counteroffer is reviewed. `return_url` must use an origin Gelatin registered for the partner.",
         "operationId": "submitBookingRequests",
         "security": [
           {
@@ -1146,7 +1571,8 @@
           },
           "profile_url": {
             "type": "string",
-            "format": "uri"
+            "format": "uri",
+            "description": "The DJ's public profile. By default, the co-branded page on the partner's active portal origin, or Gelatin's /djs page when it has none. Gelatin can set a partner to always link to Gelatin's /djs page."
           },
           "image_url": {
             "oneOf": [
@@ -1164,9 +1590,11 @@
               {
                 "type": "object",
                 "additionalProperties": false,
+                "description": "Verified draw: venue-confirmed head counts over the window, excluding disputed and auto-confirmed ones. Null when the DJ has no verified night; never 0.",
                 "required": [
                   "min",
                   "max",
+                  "avg",
                   "window"
                 ],
                 "properties": {
@@ -1175,6 +1603,10 @@
                     "minimum": 0
                   },
                   "max": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "avg": {
                     "type": "integer",
                     "minimum": 0
                   },
@@ -1187,6 +1619,16 @@
                 "type": "null"
               }
             ]
+          },
+          "genres": {
+            "type": "array",
+            "maxItems": 6,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 60
+            },
+            "description": "Up to six genres from the DJ's profile, in the DJ's own order; empty when the DJ lists none. When the catalog was filtered by genre, that genre is first. Added after the first release: clients should treat a missing field as an empty list."
           },
           "published_rate_cents": {
             "oneOf": [
@@ -1228,6 +1670,214 @@
                 "type": "null"
               }
             ]
+          }
+        }
+      },
+      "DirectoryCity": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "label",
+          "dj_count"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Atlanta"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 100,
+            "example": "Atlanta, GA",
+            "description": "Send as the city query of listPartnerDjs."
+          },
+          "dj_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "DJs listPartnerDjs returns for this label. Zero is listed, not hidden."
+          }
+        }
+      },
+      "DirectoryRegion": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "name",
+          "cities"
+        ],
+        "properties": {
+          "code": {
+            "oneOf": [
+              {
+                "type": "string",
+                "example": "GA"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "US state code, or null for cities not placed in a state."
+          },
+          "name": {
+            "type": "string",
+            "example": "Georgia"
+          },
+          "cities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DirectoryCity"
+            }
+          }
+        }
+      },
+      "DirectoryCountry": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "name",
+          "regions"
+        ],
+        "properties": {
+          "code": {
+            "oneOf": [
+              {
+                "type": "string",
+                "example": "US"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Country code, or null for cities not placed in a country."
+          },
+          "name": {
+            "type": "string",
+            "example": "United States"
+          },
+          "regions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DirectoryRegion"
+            }
+          }
+        }
+      },
+      "CityDirectory": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "countries"
+        ],
+        "properties": {
+          "countries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DirectoryCountry"
+            }
+          }
+        }
+      },
+      "CityWaitlistRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "email",
+          "city",
+          "consent"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 254,
+            "description": "The organizer's email; stored trimmed and lower-cased."
+          },
+          "city": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "A bundled city's label from listPartnerCities, such as \"Boise, ID\"."
+          },
+          "consent": {
+            "type": "boolean",
+            "const": true,
+            "description": "True only after the organizer asked to be told."
+          },
+          "source": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,39}$",
+            "description": "Where the ask came from, such as empty_state. Defaults to partner_api."
+          }
+        }
+      },
+      "CityWaitlistResult": {
+        "type": "object",
+        "required": [
+          "status",
+          "city"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "subscribed",
+              "already_subscribed"
+            ]
+          },
+          "city": {
+            "type": "object",
+            "required": [
+              "name",
+              "region",
+              "label"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "region": {
+                "type": "string",
+                "description": "US state code"
+              },
+              "label": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "GenreDirectory": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "genres"
+        ],
+        "properties": {
+          "genres": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DirectoryGenre"
+            }
+          }
+        }
+      },
+      "DirectoryGenre": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "dj_count"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The spelling most of these DJs use. Pass it as genre to listPartnerDjs."
+          },
+          "dj_count": {
+            "type": "integer",
+            "minimum": 1
           }
         }
       },
@@ -1989,6 +2639,176 @@
             "enum": [
               "usd"
             ]
+          }
+        }
+      },
+      "EventLineup": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "external_event_id",
+          "entries"
+        ],
+        "properties": {
+          "external_event_id": {
+            "type": "string"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LineupEntry"
+            }
+          }
+        }
+      },
+      "LineupEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "dj_id",
+          "name",
+          "status",
+          "profile_url",
+          "image_url"
+        ],
+        "properties": {
+          "dj_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "confirmed",
+              "pending"
+            ]
+          },
+          "profile_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The DJ's public profile. By default, the co-branded page on the partner's active portal origin, or Gelatin's /djs page when it has none. Gelatin can set a partner to always link to Gelatin's /djs page."
+          },
+          "image_url": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "AlternatesEventDetails": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "venue_name",
+          "venue_address",
+          "starts_at",
+          "ends_at",
+          "time_zone"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "venue_name": {
+            "type": "string"
+          },
+          "venue_address": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ends_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_zone": {
+            "type": "string"
+          }
+        }
+      },
+      "DjAlternates": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request_id",
+          "dj_id",
+          "date",
+          "city",
+          "budget",
+          "event",
+          "items"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "dj_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The DJ whose request was lost."
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "description": "The event's own calendar date in its time zone."
+          },
+          "city": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A listPartnerCities label, or null when there was no city to go on."
+          },
+          "budget": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "currency",
+              "dj_fee_cents"
+            ],
+            "properties": {
+              "currency": {
+                "type": "string"
+              },
+              "dj_fee_cents": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "description": "The organizer's last offered DJ fee."
+          },
+          "event": {
+            "$ref": "#/components/schemas/AlternatesEventDetails"
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+              "$ref": "#/components/schemas/PublicDj"
+            }
           }
         }
       }

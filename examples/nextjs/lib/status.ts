@@ -44,7 +44,7 @@ const LABELS: Record<PartnerBookingStatus, Described> = {
   requested: { label: "Card held · waiting for the DJ", tone: "wait", action: null, via: null, manage: true },
   negotiating: { label: "Negotiating", tone: "wait", action: null, via: null, manage: true },
   confirmed: { label: "Confirmed", tone: "ok", action: null, via: null, manage: true },
-  declined: { label: "Declined by the DJ", tone: "no", action: null, via: null, manage: false },
+  declined: { label: "Passed", tone: "no", action: null, via: null, manage: false },
   expired: { label: "Expired", tone: "no", action: null, via: null, manage: false },
   cancelled: { label: "Cancelled", tone: "no", action: null, via: null, manage: false },
 };

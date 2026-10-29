@@ -20,6 +20,11 @@ function save(draft: Draft | null) {
   } catch { /* storage unavailable: this page still works */ }
 }
 
+/** Start a new booking from outside the steps, such as an Offer on an alternate. */
+export function replaceDraft(draft: Draft) {
+  save(draft);
+}
+
 /**
  * The booking being put together, shared by the step pages in this tab only.
  * `null` until it has loaded, so server and browser render the same first frame.
