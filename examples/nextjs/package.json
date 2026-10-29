@@ -13,7 +13,7 @@
   "dependencies": {
     "@gelatinbookings/partner-sdk": "github:gelatinbookings/gelatin-partner-sdk#v0.1.0-alpha.4",
     "@stripe/stripe-js": "9.4.0",
-    "next": "16.3.4",
+    "next": "16.4.1",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "server-only": "^0.0.1",

@@ -55,6 +55,82 @@ describe("partner server client", () => {
     expect(init.credentials).toBe("omit");
   });
 
+  it("reads genres when sent, defaults them to [] from an older server, and rejects a malformed list", async () => {
+    const dj = { id: "dj_456", name: "KOYO", city: "Atlanta", tier: "verified", profile_url: "https://gelatin.example/djs/koyo", image_url: null, draw: null, published_rate_cents: null, available: true };
+    const read = (items: unknown[]) => createPartnerClient({
+      baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private",
+      fetch: mockFetch(Response.json({ items, next_cursor: null })), retries: { maxAttempts: 1 },
+    }).listDjs({ genre: "Deep House" });
+
+    expect((await read([{ ...dj, genres: ["Deep House", "Afrobeats"] }])).items[0]?.genres).toEqual(["Deep House", "Afrobeats"]);
+    expect((await read([dj])).items[0]?.genres).toEqual([]);
+    for (const genres of [null, "House", [1], [""]]) {
+      await expect(read([{ ...dj, genres }])).rejects.toMatchObject({ code: "invalid_response" });
+    }
+  });
+
+  it("sends the genre filter and reads the genre facet for a city", async () => {
+    const fetcher = vi.fn(async (url: string) => url.includes("/genres")
+      ? Response.json({ genres: [{ name: "Deep House", dj_count: 3 }], private: "x" })
+      : Response.json({ items: [], next_cursor: null })) as unknown as typeof fetch;
+    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: fetcher });
+
+    await client.listDjs({ city: "Atlanta, GA", genre: "Deep House" });
+    expect(await client.listGenres({ city: "Atlanta, GA" })).toEqual({ genres: [{ name: "Deep House", dj_count: 3 }] });
+    await client.listGenres();
+    const urls = vi.mocked(fetcher).mock.calls.map((call) => (call as unknown as [string])[0]);
+    expect(urls).toEqual([
+      "https://api.gelatin.example/v1/partners/acme/djs?city=Atlanta%2C+GA&genre=Deep+House",
+      "https://api.gelatin.example/v1/partners/acme/genres?city=Atlanta%2C+GA",
+      "https://api.gelatin.example/v1/partners/acme/genres",
+    ]);
+    await client.listGenres({ city: "Atlanta, GA", budget: ["1000_plus", "under_300", "1000_plus"] });
+    const last = vi.mocked(fetcher).mock.calls.at(-1) as unknown as [string];
+    expect(new URL(last[0]).searchParams.get("budget")).toBe("1000_plus,under_300");
+  });
+
+  it("sends each budget band once and leaves budget out when no band is ticked", async () => {
+    const fetcher = vi.fn(async () => Response.json({ items: [], next_cursor: null })) as unknown as typeof fetch;
+    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: fetcher });
+
+    await client.listDjs({ date: "2026-11-14", budget: ["1000_plus", "under_300", "1000_plus"] });
+    const [url] = vi.mocked(fetcher).mock.calls[0] as [string, RequestInit];
+    expect(new URL(url).searchParams.get("budget")).toBe("1000_plus,under_300");
+
+    await client.listDjs({ date: "2026-11-14", budget: [] });
+    expect(new URL((vi.mocked(fetcher).mock.calls[1] as [string])[0]).searchParams.has("budget")).toBe(false);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads a verified draw with its average, and one from an API that predates the average", async () => {
+    const dj = { id: "dj_456", name: "KOYO", city: "Atlanta", tier: "verified", profile_url: "https://gelatin.example/djs/koyo", image_url: null, published_rate_cents: null, available: true };
+    const fetcher = mockFetch(Response.json({
+      items: [
+        { ...dj, draw: { min: 150, max: 205, avg: 172, window: "last 90 days" } },
+        { ...dj, id: "dj_457", draw: { min: 80, max: 150, window: "last 90 days" } },
+      ],
+      next_cursor: null,
+    }));
+    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: fetcher });
+
+    const result = await client.listDjs({});
+
+    expect(result.items.map((item) => item.draw)).toEqual([
+      { min: 150, max: 205, avg: 172, window: "last 90 days" },
+      { min: 80, max: 150, avg: null, window: "last 90 days" },
+    ]);
+  });
+
+  it("rejects a draw average that isn't a whole, non-negative count", async () => {
+    const fetcher = mockFetch(Response.json({
+      items: [{ id: "dj_456", name: "KOYO", city: "Atlanta", tier: "verified", profile_url: "https://gelatin.example/djs/koyo", image_url: null, draw: { min: 150, max: 205, avg: -1, window: "last 90 days" }, published_rate_cents: null, available: true }],
+      next_cursor: null,
+    }));
+    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: fetcher });
+
+    await expect(client.listDjs({})).rejects.toThrow();
+  });
+
   it("requires a stable caller-owned idempotency key for submissions and sends one request", async () => {
     const fetcher = mockFetch(Response.json({
       submission_id: "sub_1",
@@ -146,6 +222,46 @@ describe("partner server client", () => {
     const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: fetcher });
 
     await expect(client.getEventBookings("event_123")).rejects.toMatchObject({ code: "invalid_response" });
+  });
+
+  it("reads the public lineup, asking for pending entries only when told to", async () => {
+    const fetcher = mockFetch(new Response(null, { status: 304, headers: { ETag: '"lineup-1"' } }));
+    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: fetcher });
+
+    expect(await client.getEventLineup("event_123", { ifNoneMatch: '"lineup-1"' })).toEqual({ modified: false, etag: '"lineup-1"' });
+    await client.getEventLineup("event_123", { includePending: true });
+
+    const [[first, init], [second]] = vi.mocked(fetcher).mock.calls as Array<[string, RequestInit]>;
+    expect(new URL(first).pathname).toMatch(/\/events\/event_123\/lineup$/);
+    expect(new URL(first).search).toBe("");
+    expect(new Headers(init.headers).get("If-None-Match")).toBe('"lineup-1"');
+    expect(new URL(second).searchParams.get("include")).toBe("pending");
+  });
+
+  it("returns only display fields from a lineup", async () => {
+    const fetcher = mockFetch(Response.json({
+      external_event_id: "event_123",
+      entries: [{
+        dj_id: "dj_456", name: "Synthetic DJ", status: "confirmed",
+        profile_url: "https://gelatin.example/djs/synthetic-dj", image_url: null,
+        total_cents: 56_500,
+      }],
+    }, { headers: { ETag: '"lineup-2"' } }));
+    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: fetcher });
+
+    const result = await client.getEventLineup("event_123");
+
+    expect(result).toEqual({
+      modified: true, etag: '"lineup-2"',
+      data: { external_event_id: "event_123", entries: [{ dj_id: "dj_456", name: "Synthetic DJ", status: "confirmed", profile_url: "https://gelatin.example/djs/synthetic-dj", image_url: null }] },
+    });
+  });
+
+  it("rejects a lineup entry with an unknown status", async () => {
+    const fetcher = mockFetch(Response.json({ external_event_id: "event_123", entries: [{ dj_id: "dj_456", name: "x", status: "declined", profile_url: "https://x.test", image_url: null }] }));
+    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: fetcher });
+
+    await expect(client.getEventLineup("event_123")).rejects.toMatchObject({ code: "invalid_response" });
   });
 
   it("preserves a narrow API error without including a raw response or credential", async () => {
@@ -253,14 +369,14 @@ describe("partner server client", () => {
   it("creates a payment session for the page to mount, under a fresh key per call", async () => {
     const body = { client_secret: "cs_test_a1_secret_b2", publishable_key: "pk_test_c3", total_cents: 11051, currency: "usd" };
     const fetcher = vi.fn(async () => Response.json(body, { status: 201 })) as unknown as typeof fetch;
-    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/memberly", apiKey: "gel_test_private", fetch: fetcher });
+    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: fetcher });
     const input = { external_event_id: "event_123", external_user_id: "user_789", resource: { kind: "request" as const, id: "33333333-3333-4333-8333-333333333333" } };
 
     expect(await client.createPaymentSession(input)).toEqual(body);
     await client.createPaymentSession(input);
 
     const calls = (fetcher as unknown as ReturnType<typeof vi.fn>).mock.calls as Array<[string, RequestInit]>;
-    expect(new URL(calls[0][0]).pathname).toBe("/v1/partners/memberly/payment-sessions");
+    expect(new URL(calls[0][0]).pathname).toBe("/v1/partners/acme/payment-sessions");
     expect(JSON.parse(String(calls[0][1].body))).toEqual(input);
     const keys = calls.map(([, init]) => new Headers(init.headers).get("Idempotency-Key"));
     expect(keys[0]).toBeTruthy();
@@ -269,7 +385,7 @@ describe("partner server client", () => {
 
   it("rejects a payment session answer that isn't a client secret and publishable key", async () => {
     const client = createPartnerClient({
-      baseUrl: "https://api.gelatin.example/v1/partners/memberly", apiKey: "gel_test_private",
+      baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private",
       fetch: mockFetch(Response.json({ client_secret: "cs_test_a1_secret_b2", total_cents: 11051, currency: "usd" }, { status: 201 })),
     });
     await expect(client.createPaymentSession({ external_event_id: "e", external_user_id: "u", resource: { kind: "request", id: "33333333-3333-4333-8333-333333333333" } })).rejects.toMatchObject({ code: "invalid_response" });

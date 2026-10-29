@@ -5,12 +5,21 @@ import type {
   BookingActionKind,
   BookingRequest,
   BookingRequestResult,
+  CityDirectory,
+  CityWaitlistRequest,
+  CityWaitlistResult,
   ConditionalEventBookings,
+  ConditionalEventLineup,
+  DjAlternates,
   DjCatalogPage,
   DjCatalogQuery,
   EventBookings,
   EventChange,
   EventChangeResult,
+  EventLineup,
+  GenreDirectory,
+  GenreQuery,
+  LineupStatus,
   PortalLaunchRequest,
   PortalLaunchResult,
   PaymentSessionRequest,
@@ -70,6 +79,7 @@ const STATUSES = new Set<PartnerBookingStatus>([
 ]);
 const TIERS = new Set(["verified", "top_performer", "resident", "city_pillar"]);
 const ACTIONS = new Set(["authorize", "review_terms", "reauthorize", "view_booking"]);
+const LINEUP_STATUSES = new Set<LineupStatus>(["confirmed", "pending"]);
 
 function invalidResponse(): never {
   throw new PartnerApiError(502, "invalid_response", "Partner API returned an invalid response");
@@ -109,26 +119,88 @@ function amount(value: unknown): { currency: string; total_cents: number } {
   return { currency: string(row.currency), total_cents: integer(row.total_cents) };
 }
 
+function publicDj(item: unknown): PublicDj {
+  const row = object(item);
+  const draw = row.draw === null ? null : object(row.draw);
+  if (typeof row.available !== "boolean") return invalidResponse();
+  return {
+    id: string(row.id),
+    name: string(row.name),
+    city: string(row.city),
+    tier: literal(row.tier, TIERS) as PublicDj["tier"],
+    profile_url: string(row.profile_url),
+    image_url: optionalString(row.image_url),
+    // avg is newer than min/max/window, so an API that doesn't send it still parses.
+    draw: draw ? { min: integer(draw.min), max: integer(draw.max), avg: draw.avg === undefined ? null : integer(draw.avg), window: string(draw.window) } : null,
+    // Additive field: a server that predates it sends none.
+    genres: row.genres === undefined ? [] : array(row.genres).map(string).slice(0, 6),
+    published_rate_cents: row.published_rate_cents === null ? null : integer(row.published_rate_cents),
+    available: row.available,
+  };
+}
+
 function catalog(value: unknown): DjCatalogPage {
   const body = object(value);
+  return { items: array(body.items).map(publicDj), next_cursor: optionalString(body.next_cursor) };
+}
+
+function djAlternates(value: unknown): DjAlternates {
+  const body = object(value);
+  const budget = object(body.budget);
+  const event = object(body.event);
+  if (typeof body.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(body.date)) return invalidResponse();
   return {
-    items: array(body.items).map((item): PublicDj => {
-      const row = object(item);
-      const draw = row.draw === null ? null : object(row.draw);
-      if (typeof row.available !== "boolean") return invalidResponse();
+    request_id: string(body.request_id),
+    dj_id: string(body.dj_id),
+    date: body.date,
+    city: optionalString(body.city),
+    budget: { currency: string(budget.currency), dj_fee_cents: integer(budget.dj_fee_cents) },
+    event: {
+      name: string(event.name), venue_name: string(event.venue_name), venue_address: optionalString(event.venue_address),
+      starts_at: string(event.starts_at), ends_at: string(event.ends_at), time_zone: string(event.time_zone),
+    },
+    items: array(body.items).map(publicDj),
+  };
+}
+
+function cityDirectory(value: unknown): CityDirectory {
+  const body = object(value);
+  return {
+    countries: array(body.countries).map((item) => {
+      const country = object(item);
       return {
-        id: string(row.id),
-        name: string(row.name),
-        city: string(row.city),
-        tier: literal(row.tier, TIERS) as PublicDj["tier"],
-        profile_url: string(row.profile_url),
-        image_url: optionalString(row.image_url),
-        draw: draw ? { min: integer(draw.min), max: integer(draw.max), window: string(draw.window) } : null,
-        published_rate_cents: row.published_rate_cents === null ? null : integer(row.published_rate_cents),
-        available: row.available,
+        code: optionalString(country.code),
+        name: string(country.name),
+        regions: array(country.regions).map((entry) => {
+          const region = object(entry);
+          return {
+            code: optionalString(region.code),
+            name: string(region.name),
+            cities: array(region.cities).map((city) => {
+              const row = object(city);
+              return { name: string(row.name), label: string(row.label), dj_count: integer(row.dj_count) };
+            }),
+          };
+        }),
       };
     }),
-    next_cursor: optionalString(body.next_cursor),
+  };
+}
+
+function cityWaitlistResult(value: unknown): CityWaitlistResult {
+  const body = object(value);
+  if (body.status !== "subscribed" && body.status !== "already_subscribed") return invalidResponse();
+  const city = object(body.city);
+  return { status: body.status, city: { name: string(city.name), region: string(city.region), label: string(city.label) } };
+}
+
+function genreDirectory(value: unknown): GenreDirectory {
+  const body = object(value);
+  return {
+    genres: array(body.genres).map((item) => {
+      const row = object(item);
+      return { name: string(row.name), dj_count: integer(row.dj_count) };
+    }),
   };
 }
 
@@ -211,6 +283,8 @@ function eventBookings(value: unknown): EventBookings {
             dj_id: string(row.dj_id),
             status: literal(row.status, STATUSES),
             offer_revision: integer(row.offer_revision),
+            // Absent from older servers: treat missing as settled (null).
+            pending_party: row.pending_party === "organizer" || row.pending_party === "dj" ? row.pending_party : null,
             amount: row.amount === null ? null : amount(row.amount),
             actions: array(row.actions).map((item) => {
               const action = object(item);
@@ -218,6 +292,23 @@ function eventBookings(value: unknown): EventBookings {
             }),
           };
         }),
+      };
+    }),
+  };
+}
+
+function eventLineup(value: unknown): EventLineup {
+  const body = object(value);
+  return {
+    external_event_id: string(body.external_event_id),
+    entries: array(body.entries).map((item) => {
+      const row = object(item);
+      return {
+        dj_id: string(row.dj_id),
+        name: string(row.name),
+        status: literal(row.status, LINEUP_STATUSES),
+        profile_url: string(row.profile_url),
+        image_url: optionalString(row.image_url),
       };
     }),
   };
@@ -404,11 +495,46 @@ export function createPartnerClient(options: PartnerClientOptions) {
     async listDjs(query: DjCatalogQuery = {}, options: ReadOptions = {}): Promise<DjCatalogPage> {
       const params = new URLSearchParams();
       if (query.city) params.set("city", query.city);
+      if (query.genre) params.set("genre", query.genre);
       if (query.date) params.set("date", query.date);
+      // Gelatin checks the band keys and answers 400 invalid_query for an unknown one.
+      if (query.budget?.length) params.set("budget", [...new Set(query.budget)].join(","));
       if (query.cursor) params.set("cursor", query.cursor);
       if (query.limit !== undefined) params.set("limit", String(query.limit));
       const path = `djs${params.size ? `?${params}` : ""}`;
       return json(await request(path, "GET", undefined, options), catalog);
+    },
+    /**
+     * Mounted route. Every US state with its major cities (`US_MAJOR_CITIES`
+     * from `@gelatinbookings/partner-sdk/places`), plus any other city your
+     * catalog has a DJ in, each with your DJ count. Pass a city's `label` to
+     * `listDjs`; narrow the list with `filterCityDirectory`.
+     */
+    async listCities(options: ReadOptions = {}): Promise<CityDirectory> {
+      return json(await request("cities", "GET", undefined, options), cityDirectory);
+    },
+    /**
+     * Mounted route. When an organizer picks a city with `dj_count: 0`, offer
+     * to tell them when DJs arrive and send their email here once they say
+     * yes. A repeat for the same email and city answers `already_subscribed`.
+     * Gelatin never returns the email or anyone else's sign-up. Needs the
+     * `requests:write` scope and counts against your write quota.
+     */
+    async joinCityWaitlist(input: CityWaitlistRequest, options: DefaultedWriteOptions = {}): Promise<CityWaitlistResult> {
+      const idempotencyKey = options.idempotencyKey ?? randomKey();
+      return json(await request("city-waitlist", "POST", input, { ...options, idempotencyKey }), cityWaitlistResult);
+    },
+    /**
+     * Mounted route. The genres your catalog's DJs list, each with its DJ
+     * count, busiest first. With `city`, only DJs `listDjs({ city })` returns
+     * are counted, so every genre listed finds at least one DJ there. Pass a
+     * genre's `name` to `listDjs({ genre })`.
+     */
+    async listGenres(query: GenreQuery = {}, options: ReadOptions = {}): Promise<GenreDirectory> {
+      const params = new URLSearchParams();
+      if (query.city) params.set("city", query.city);
+      if (query.budget?.length) params.set("budget", [...new Set(query.budget)].join(","));
+      return json(await request(`genres${params.size ? `?${params}` : ""}`, "GET", undefined, options), genreDirectory);
     },
     /**
      * Mounted route. Use `partner_event_flow` placement when your page takes the
@@ -454,6 +580,26 @@ export function createPartnerClient(options: PartnerClientOptions) {
       const etag = response.headers.get("ETag");
       if (response.status === 304) return { modified: false, etag };
       return { modified: true, etag, data: await json(response, eventBookings) };
+    },
+    /**
+     * Mounted route. After a request is lost (`declined`, `expired` or
+     * `cancelled`), who else is open that night in that city at about that
+     * budget, with the event details to prefill a new request. A live request
+     * answers `409 request_active`. Reading this books and holds nothing.
+     */
+    async listAlternates(eventId: string, requestId: string, options: ReadOptions = {}): Promise<DjAlternates> {
+      return json(await request(`events/${externalId(eventId)}/dj-bookings/${encodeURIComponent(requestId)}/alternates`, "GET", undefined, options), djAlternates);
+    },
+    /**
+     * Mounted route. Confirmed DJs only, unless `includePending` adds offers
+     * the DJ is still answering (for a "TBA" slot). Display data only.
+     */
+    async getEventLineup(eventId: string, options: ReadOptions & { ifNoneMatch?: string; includePending?: boolean } = {}): Promise<ConditionalEventLineup> {
+      const { includePending, ...settings } = options;
+      const response = await request(`events/${externalId(eventId)}/lineup${includePending ? "?include=pending" : ""}`, "GET", undefined, settings);
+      const etag = response.headers.get("ETag");
+      if (response.status === 304) return { modified: false, etag };
+      return { modified: true, etag, data: await json(response, eventLineup) };
     },
     async updateEvent(eventId: string, change: EventChange, options: WriteOptions): Promise<EventChangeResult> {
       if (!Number.isSafeInteger(change.revision) || change.revision < 1) throw new TypeError("A positive event revision is required");

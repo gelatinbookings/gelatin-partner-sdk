@@ -1,6 +1,6 @@
 {
   "name": "@gelatinbookings/partner-sdk",
-  "version": "0.1.0-alpha.4",
+  "version": "0.1.0-alpha.5",
   "description": "Typed, dependency-free client for Gelatin's partner booking API",
   "license": "MIT",
   "type": "module",
@@ -23,6 +23,18 @@
     "./types": {
       "types": "./dist/types.d.ts",
       "import": "./dist/types.js"
+    },
+    "./budget": {
+      "types": "./dist/budget.d.ts",
+      "import": "./dist/budget.js"
+    },
+    "./places": {
+      "types": "./dist/places.d.ts",
+      "import": "./dist/places.js"
+    },
+    "./genres": {
+      "types": "./dist/genres.d.ts",
+      "import": "./dist/genres.js"
     }
   },
   "scripts": {

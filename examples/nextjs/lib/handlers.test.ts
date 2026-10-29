@@ -3,7 +3,7 @@ import { PartnerApiError } from "@gelatinbookings/partner-sdk/server";
 import { readDemoConfig, type DemoConfig } from "./config";
 import { cookieNames, hasValidSession, issueSession, readBookings, readCookie, writeBookings, type DemoBooking } from "./cookies";
 import { approvedLaunchUrl, type GelatinClient } from "./gelatin";
-import { createBookingPost, createLaunchPost, createLoginPost, createLogoutPost, createPaymentPost, memoryLoginLimiter, type HandlerDeps } from "./handlers";
+import { createAvailabilityPost, createBookingPost, createCityWaitlistPost, createGenresGet, createLaunchPost, createLoginPost, createLogoutPost, createPaymentPost, createTierPost, memoryLoginLimiter, type HandlerDeps } from "./handlers";
 
 const config: DemoConfig = readDemoConfig({
   GELATIN_API_BASE_URL: "https://staging.gelatinbookings.com",
@@ -128,6 +128,19 @@ describe("booking submission", () => {
     expect(saved[0].engagements).toEqual([{ requestId: REQUEST_ID, djName: "DJ One", totalCents: 54_200, currency: "usd" }]);
   });
 
+  it("remembers the event details it sent, for its own public event page", async () => {
+    const submitBookingRequests = vi.fn(async () => ({
+      group_id: "g", event_id: "e",
+      engagements: [{ id: "x", external_request_id: "r", dj_id: DJ_ID, request_id: REQUEST_ID, booking_id: "b", offer_id: "o", revision: 1, total_cents: 54_200, currency: "usd" }],
+    }));
+    const response = await createBookingPost(deps({ submitBookingRequests }))(post("/api/bookings", form, { cookie: sessionCookie() }));
+    const saved = readBookings(config, readCookie(cookieValue(response.headers.get("set-cookie") ?? ""), names.bookings));
+    expect(saved[0].event).toEqual({
+      startsAt: "2030-11-15T21:00:00-05:00", endsAt: "2030-11-15T23:30:00-05:00", timeZone: "America/New_York",
+      venueName: "The Loft", venueAddress: "12 Example St, Atlanta, GA 30309",
+    });
+  });
+
   it("requires a session and a same-origin request before calling Gelatin", async () => {
     const submitBookingRequests = vi.fn();
     expect((await createBookingPost(deps({ submitBookingRequests }))(post("/api/bookings", form))).status).toBe(401);
@@ -142,6 +155,37 @@ describe("booking submission", () => {
     const response = await createBookingPost(deps({ submitBookingRequests }))(post("/api/bookings", form, { cookie: sessionCookie() }));
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({ error: expect.stringContaining("already sent"), request_id: "req_123" });
+  });
+});
+
+describe("genres for a city", () => {
+  const get = (query: string, cookie: string | null = sessionCookie()) =>
+    new Request(`${ORIGIN}/api/genres${query}`, { headers: cookie ? { cookie } : {} });
+
+  it("asks Gelatin for the city's genres and returns only names and counts", async () => {
+    const listGenres = vi.fn(async () => ({ genres: [{ name: "Deep House", dj_count: 2 }] }));
+    const response = await createGenresGet(deps({ listGenres }))(get("?city=Atlanta%2C%20GA"));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ genres: [{ name: "Deep House", dj_count: 2 }] });
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(listGenres).toHaveBeenCalledWith({ city: "Atlanta, GA" });
+    await createGenresGet(deps({ listGenres }))(get("?city="));
+    expect(listGenres).toHaveBeenLastCalledWith({ city: undefined });
+  });
+
+  it("refuses a caller without a session, and unknown fields, before calling Gelatin", async () => {
+    const listGenres = vi.fn();
+    expect((await createGenresGet(deps({ listGenres }))(get("?city=Atlanta", null))).status).toBe(401);
+    expect((await createGenresGet(deps({ listGenres }))(get("?partner=other"))).status).toBe(400);
+    expect((await createGenresGet(deps({ listGenres }))(get(`?city=${"a".repeat(101)}`))).status).toBe(400);
+    expect(listGenres).not.toHaveBeenCalled();
+  });
+
+  it("words a Gelatin failure without its body", async () => {
+    const listGenres = vi.fn(async () => { throw new PartnerApiError(503, "temporarily_unavailable", "x", "req_1"); });
+    const response = await createGenresGet(deps({ listGenres }))(get("?city=Atlanta"));
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ error: "Gelatin is unavailable right now. Try again shortly.", request_id: "req_1" });
   });
 });
 
@@ -225,6 +269,97 @@ describe("payment on this page", () => {
   });
 });
 
+describe("city waitlist", () => {
+  const city = { name: "Boise", region: "ID", label: "Boise, ID" };
+  const ask = { email: " organizer@example.test ", city: "Boise, ID" };
+
+  it("sends the organizer's ask with consent and the empty-state source, and answers without the email", async () => {
+    const joinCityWaitlist = vi.fn(async () => ({ status: "subscribed" as const, city }));
+    const response = await createCityWaitlistPost(deps({ joinCityWaitlist }))(post("/api/city-waitlist", ask, { cookie: sessionCookie() }));
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual({ status: "subscribed", city: "Boise" });
+    expect(joinCityWaitlist).toHaveBeenCalledWith({ email: "organizer@example.test", city: "Boise, ID", consent: true, source: "empty_state" });
+  });
+
+  it("reports a repeat as already on the list", async () => {
+    const joinCityWaitlist = vi.fn(async () => ({ status: "already_subscribed" as const, city }));
+    const response = await createCityWaitlistPost(deps({ joinCityWaitlist }))(post("/api/city-waitlist", ask, { cookie: sessionCookie() }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "already_subscribed", city: "Boise" });
+  });
+
+  it("refuses a bad email, a signed-out or cross-site caller, before calling Gelatin", async () => {
+    const joinCityWaitlist = vi.fn();
+    const handler = createCityWaitlistPost(deps({ joinCityWaitlist }));
+    expect((await handler(post("/api/city-waitlist", { ...ask, email: "nope" }, { cookie: sessionCookie() }))).status).toBe(400);
+    expect((await handler(post("/api/city-waitlist", { ...ask, consent: false }, { cookie: sessionCookie() }))).status).toBe(400);
+    expect((await handler(post("/api/city-waitlist", ask))).status).toBe(401);
+    expect((await handler(post("/api/city-waitlist", ask, { cookie: sessionCookie(), origin: "https://evil.example" }))).status).toBe(403);
+    expect(joinCityWaitlist).not.toHaveBeenCalled();
+  });
+
+  it("passes on Gelatin's rate limit and rejection without the raw response", async () => {
+    for (const [status, code, expected] of [[429, "rate_limited", 429], [400, "invalid_request", 400]] as const) {
+      const joinCityWaitlist = vi.fn(async () => { throw new PartnerApiError(status, code, "Partner API request failed", "req_w"); });
+      const response = await createCityWaitlistPost(deps({ joinCityWaitlist }))(post("/api/city-waitlist", ask, { cookie: sessionCookie() }));
+      expect(response.status).toBe(expected);
+      const body = await response.json();
+      expect(body.request_id).toBe("req_w");
+      expect(JSON.stringify(body)).not.toContain("organizer@example.test");
+    }
+  });
+});
+
+describe("re-checking picked DJs (POST /api/availability)", () => {
+  const OTHER = "55555555-5555-4555-8555-555555555555";
+  const catalog = (items: Array<{ id: string; available: boolean }>) => vi.fn(async () => ({ items, next_cursor: null }));
+
+  it("returns only the picked DJs that are no longer free that night", async () => {
+    const listDjs = catalog([{ id: DJ_ID, available: false }, { id: OTHER, available: true }]);
+    const response = await createAvailabilityPost(deps({ listDjs } as unknown as Partial<GelatinClient>))(
+      post("/api/availability", { date: "2030-11-15", dj_ids: [DJ_ID, OTHER] }, { cookie: sessionCookie() }));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ unavailable: [DJ_ID], complete: true });
+    expect(listDjs).toHaveBeenCalledWith({ date: "2030-11-15", limit: 100 });
+  });
+
+  it("returns an empty list when everyone is still free", async () => {
+    const listDjs = catalog([{ id: DJ_ID, available: true }]);
+    const response = await createAvailabilityPost(deps({ listDjs } as unknown as Partial<GelatinClient>))(
+      post("/api/availability", { date: "2030-11-15", dj_ids: [DJ_ID] }, { cookie: sessionCookie() }));
+    expect(await response.json()).toEqual({ unavailable: [], complete: true });
+  });
+
+  it("refuses cross-site posts, missing sessions and malformed bodies before calling Gelatin", async () => {
+    const listDjs = catalog([]);
+    const handler = createAvailabilityPost(deps({ listDjs } as unknown as Partial<GelatinClient>));
+    const body = { date: "2030-11-15", dj_ids: [DJ_ID] };
+    expect((await handler(post("/api/availability", body, { cookie: sessionCookie(), origin: "https://evil.example" }))).status).toBe(403);
+    expect((await handler(post("/api/availability", body))).status).toBe(401);
+    for (const bad of [
+      { ...body, extra: 1 },
+      { date: "15/11/2030", dj_ids: [DJ_ID] },
+      { date: "2030-11-15", dj_ids: [] },
+      { date: "2030-11-15", dj_ids: ["not-a-uuid"] },
+      { date: "2030-11-15", dj_ids: Array.from({ length: 6 }, (_, i) => `5555555${i}-5555-4555-8555-555555555555`) },
+    ]) {
+      expect((await handler(post("/api/availability", bad, { cookie: sessionCookie() }))).status).toBe(400);
+    }
+    expect(listDjs).not.toHaveBeenCalled();
+  });
+
+  it("says Gelatin is unavailable without leaking the raw error", async () => {
+    const listDjs = vi.fn(async () => { throw new PartnerApiError(503, "temporarily_unavailable", "internal detail", "req_11"); });
+    const response = await createAvailabilityPost(deps({ listDjs } as unknown as Partial<GelatinClient>))(
+      post("/api/availability", { date: "2030-11-15", dj_ids: [DJ_ID] }, { cookie: sessionCookie() }));
+    expect(response.status).toBe(502);
+    const text = await response.text();
+    expect(text).toContain("unavailable right now");
+    expect(text).not.toContain("internal detail");
+  });
+});
+
 describe("Gelatin error wording", () => {
   it("says plainly when a chosen DJ isn't available, without claiming an outage", async () => {
     const submitBookingRequests = vi.fn(async () => { throw new PartnerApiError(409, "dj_unavailable", "Partner API request failed", "req_9"); });
@@ -235,10 +370,73 @@ describe("Gelatin error wording", () => {
     expect(error).not.toContain("unavailable right now");
   });
 
+  it("names the DJ a 409 dj_unavailable was about, so the page can offer to remove them", async () => {
+    const submitBookingRequests = vi.fn(async () => { throw new PartnerApiError(409, "dj_unavailable", "Partner API request failed", "req_9", `demo-req-${form.nonce}-1`); });
+    const response = await createBookingPost(deps({ submitBookingRequests }))(post("/api/bookings", form, { cookie: sessionCookie() }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual(expect.objectContaining({ code: "dj_unavailable", dj_ids: [DJ_ID], request_id: "req_9" }));
+  });
+
+  it("still answers a 409 dj_unavailable without a request ID it can match", async () => {
+    const submitBookingRequests = vi.fn(async () => { throw new PartnerApiError(409, "dj_unavailable", "Partner API request failed", "req_9", "someone-else-1"); });
+    const response = await createBookingPost(deps({ submitBookingRequests }))(post("/api/bookings", form, { cookie: sessionCookie() }));
+    expect(await response.json()).toEqual(expect.objectContaining({ code: "dj_unavailable", dj_ids: [] }));
+  });
+
   it("reports a 503 as a short outage", async () => {
     const submitBookingRequests = vi.fn(async () => { throw new PartnerApiError(503, "temporarily_unavailable", "Partner API request failed", "req_10"); });
     const response = await createBookingPost(deps({ submitBookingRequests }))(post("/api/bookings", form, { cookie: sessionCookie() }));
     expect(response.status).toBe(502);
     expect((await response.json()).error).toContain("unavailable right now");
+  });
+});
+
+describe("Light / Full tier (GEL-917)", () => {
+  const tierPost = (tier: string, headers: Record<string, string> = {}) =>
+    new Request(`${ORIGIN}/api/tier`, { method: "POST", headers: { origin: ORIGIN, ...headers }, body: new URLSearchParams({ tier }) });
+  const engagement = { id: "x", external_request_id: "r", dj_id: DJ_ID, request_id: REQUEST_ID, booking_id: "b", offer_id: "o", revision: 1, total_cents: 54_200, currency: "usd" };
+  const lightCookie = () => `${sessionCookie()}; ${names.tier}=light`;
+
+  it("switches the tier for a signed-in browser and goes back to a new booking", async () => {
+    const response = await createTierPost(deps())(tierPost("light", { cookie: sessionCookie() }));
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(`${ORIGIN}/`);
+    const set = response.headers.get("set-cookie") ?? "";
+    expect(cookieValue(set)).toBe(`${names.tier}=light`);
+    expect(set).toMatch(/HttpOnly/);
+    expect(set).toMatch(/SameSite=Lax/);
+  });
+
+  it("refuses a cross-site switch, a signed-out one and an unknown tier", async () => {
+    expect((await createTierPost(deps())(tierPost("light", { origin: "https://evil.example.test", cookie: sessionCookie() }))).status).toBe(403);
+    expect((await createTierPost(deps())(tierPost("light"))).status).toBe(401);
+    expect((await createTierPost(deps())(tierPost("platinum", { cookie: sessionCookie() }))).status).toBe(400);
+  });
+
+  it("sends a Light booking for Gelatin's portal to take the hold, and goes straight there", async () => {
+    const submitBookingRequests = vi.fn(async () => ({ group_id: "g", event_id: "e", engagements: [engagement] }));
+    const launchUrl = `https://book-demo.staging.gelatinbookings.com/partner/launch#token=${token}`;
+    const createPortalLaunch = vi.fn(async () => ({ url: launchUrl, expires_at: "2030-01-01T00:01:00Z" }));
+    const response = await createBookingPost(deps({ submitBookingRequests, createPortalLaunch }))(post("/api/bookings", form, { cookie: lightCookie() }));
+    expect(response.status).toBe(201);
+    const [packet] = submitBookingRequests.mock.calls[0] as unknown as [{ authorization_placement: string; organizer: { external_user_id: string } }];
+    expect(packet.authorization_placement).toBe("gelatin_portal_handoff");
+    expect(createPortalLaunch).toHaveBeenCalledWith(expect.objectContaining({
+      external_event_id: `demo-evt-${form.nonce}`, external_user_id: packet.organizer.external_user_id, resource: { kind: "request", id: REQUEST_ID },
+    }));
+    expect(await response.json()).toEqual({ next: launchUrl });
+    // The booking is still remembered, for the Light status list.
+    expect(readBookings(config, readCookie(cookieValue(response.headers.get("set-cookie") ?? ""), names.bookings))).toHaveLength(1);
+  });
+
+  it("falls back to the bookings list when the portal link can't be made", async () => {
+    const submitBookingRequests = vi.fn(async () => ({ group_id: "g", event_id: "e", engagements: [engagement] }));
+    const createPortalLaunch = vi.fn(async () => { throw new Error("down"); });
+    const response = await createBookingPost(deps({ submitBookingRequests, createPortalLaunch }))(post("/api/bookings", form, { cookie: lightCookie() }));
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual({ next: `/bookings?event=demo-evt-${form.nonce}` });
+    const outside = vi.fn(async () => ({ url: "https://evil.example.test/partner/launch#token=x", expires_at: "2030-01-01T00:01:00Z" }));
+    const refused = await createBookingPost(deps({ submitBookingRequests, createPortalLaunch: outside }))(post("/api/bookings", form, { cookie: lightCookie() }));
+    expect(await refused.json()).toEqual({ next: `/bookings?event=demo-evt-${form.nonce}` });
   });
 });

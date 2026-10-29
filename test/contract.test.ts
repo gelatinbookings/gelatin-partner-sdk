@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import { BUDGET_BANDS } from "../src/budget.js";
 import { createPartnerClient } from "../src/server.js";
 import type { DjRequestSubmission } from "../src/types.js";
 
@@ -12,11 +13,16 @@ describe("public partner contract", () => {
     const paths = spec.paths as Record<string, Record<string, Record<string, unknown>>>;
     expect(Object.keys(paths).sort()).toEqual([
       "/v1/partners/{partner}/djs",
+      "/v1/partners/{partner}/cities",
+      "/v1/partners/{partner}/city-waitlist",
+      "/v1/partners/{partner}/genres",
       "/v1/partners/{partner}/booking-requests",
       "/v1/partners/{partner}/dj-request-submissions",
       "/v1/partners/{partner}/events/{external_event_id}",
       "/v1/partners/{partner}/events/{external_event_id}/attendance",
       "/v1/partners/{partner}/events/{external_event_id}/dj-bookings",
+      "/v1/partners/{partner}/events/{external_event_id}/dj-bookings/{request_id}/alternates",
+      "/v1/partners/{partner}/events/{external_event_id}/lineup",
       "/v1/partners/{partner}/launch-sessions",
       "/v1/partners/{partner}/payment-sessions",
       "/v1/partners/{partner}/portal-launches",
@@ -34,7 +40,7 @@ describe("public partner contract", () => {
         }
       }
     }
-    expect(ids.size).toBe(9);
+    expect(ids.size).toBe(14);
   });
 
   it("has no unresolved component references or bundled runtime dependencies", () => {
@@ -124,11 +130,33 @@ describe("public partner contract", () => {
     expect(schemas.BookingRequestEngagement.required).toEqual(expect.arrayContaining(["request_id", "booking_id", "total_cents", "currency"]));
   });
 
+  it("describes the public lineup as display data with no money or booking identifiers", () => {
+    const paths = spec.paths as Record<string, Record<string, { operationId: string; parameters: Array<{ name: string; in: string; schema?: { enum?: string[] } }>; responses: Record<string, { content?: Record<string, { schema: { $ref: string } }> }> }>>;
+    const lineup = paths["/v1/partners/{partner}/events/{external_event_id}/lineup"].get;
+    expect(lineup.operationId).toBe("getEventLineup");
+    expect(lineup.parameters).toContainEqual(expect.objectContaining({ name: "include", in: "query", schema: expect.objectContaining({ enum: ["pending"] }) }));
+    expect(lineup.responses["200"].content?.["application/json"].schema.$ref).toBe("#/components/schemas/EventLineup");
+    expect(Object.keys(lineup.responses)).toEqual(expect.arrayContaining(["304", "400", "401", "403", "404", "429", "503"]));
+    const schemas = (spec.components as { schemas: Record<string, { required?: string[]; properties?: Record<string, { enum?: string[] }>; additionalProperties?: boolean }> }).schemas;
+    expect(schemas.EventLineup.required).toEqual(["external_event_id", "entries"]);
+    expect(Object.keys(schemas.LineupEntry.properties ?? {}).sort()).toEqual(["dj_id", "image_url", "name", "profile_url", "status"]);
+    expect(schemas.LineupEntry.properties?.status.enum).toEqual(["confirmed", "pending"]);
+  });
+
   it("documents the permanent submission errors on the mounted route", () => {
     const submit = (spec.paths as Record<string, Record<string, { responses: Record<string, { description: string }> }>>)["/v1/partners/{partner}/booking-requests"].post;
     expect(submit.responses["409"].description).toContain("`dj_unavailable`");
     expect(submit.responses["409"].description).toContain("`conflict`");
     expect(submit.responses["400"].description).toContain("100,000,000");
     expect(submit.responses["503"].description).toContain("Retry-After: 30");
+  });
+
+  it("documents exactly the SDK's budget bands on the catalog read", () => {
+    const list = (spec.paths as Record<string, Record<string, { parameters: Array<{ name: string; schema: { pattern: string } }> }>>)["/v1/partners/{partner}/djs"].get;
+    const budget = list.parameters.find((parameter) => parameter.name === "budget");
+    const pattern = new RegExp(budget!.schema.pattern);
+    expect(pattern.test(BUDGET_BANDS.map((band) => band.key).join(","))).toBe(true);
+    for (const band of BUDGET_BANDS) expect(pattern.test(band.key)).toBe(true);
+    for (const value of ["", "cheap", "under_300,", "under_300,300_to_600,600_to_1000,1000_plus,under_300"]) expect(pattern.test(value)).toBe(false);
   });
 });

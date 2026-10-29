@@ -7,7 +7,7 @@ A small, typed TypeScript client for Gelatin's partner booking API. With it, you
 - Idempotency keys and safe retries by default
 - [OpenAPI 3.1 spec](openapi/partner-api.openapi.json) included. The API is plain HTTPS + JSON, so any language works without this package.
 
-> **Pre-release (`0.1.0-alpha`).** The contract may change before 1.0. Pin to a tag.
+> **Pre-release (`0.1.0-alpha`).** The contract may change before 1.0. Pin to a tag. What changed in each release: [CHANGELOG](CHANGELOG.md).
 
 ## What this is, in plain words
 
@@ -109,6 +109,89 @@ A runnable version is in [`examples/quickstart.ts`](examples/quickstart.ts).
 For a complete website, see the [Next.js partner example](examples/nextjs/README.md): a small events site you can run against the sandbox and click through the whole journey, including payment, the DJ's reply and live status.
 
 Gelatin never calls your server. Status is pull-only: read it when the organizer comes back, when they open the event, or on a schedule. Pass `{ ifNoneMatch: lastEtag }` to skip unchanged reads: the result is `{ modified: false }` until something changes, then `{ modified: true, etag, data }`.
+
+## Finding DJs
+
+### Choosing a city
+
+`@gelatinbookings/partner-sdk/places` ships the list a city picker needs, with no request: `US_STATES` (all 50 states plus DC) and `US_MAJOR_CITIES`, each state's major cities with a point. The cities are the Census Bureau's 200 most populous places plus each state's largest (Vintage 2024 estimates and 2024 Gazetteer points, both public domain).
+
+`listCities()` returns the same cities grouped by state, plus any other city where your catalog has a DJ, each with `dj_count`: how many DJs `listDjs` returns for its `label`. That counts DJs whose profile names the city and, for a listed city, DJs whose service radius covers it, so a big city with no local DJs still shows the ones who travel there. A city with no DJs keeps `dj_count: 0`; list it rather than hiding it. `filterCityDirectory(directory, query)` narrows the list the way Gelatin's picker does: by the start of a city's name, or every city in a state ("GA") or country ("US").
+
+```ts
+import { filterCityDirectory } from "@gelatinbookings/partner-sdk/places";
+
+const georgia = filterCityDirectory(await gelatin.listCities(), "GA");
+const djs = await gelatin.listDjs({ city: georgia.countries[0].regions[0].cities[0].label });
+```
+
+`listDjs({ city })` accepts a city with or without its state: `"Atlanta, GA"`, `"Atlanta"` and `"Atlanta, Georgia"` are the same city. Neither call returns coordinates or radii.
+
+### A city with no DJs yet
+
+When the organizer picks a city with `dj_count: 0`, say Gelatin isn't there yet and offer to tell them when DJs are. Once they say yes, send their email with the city's `label`. It needs the `requests:write` scope and counts against your write quota. Gelatin keeps one sign-up per email, city and partner: a repeat answers `already_subscribed`. The answer never contains the email or anyone else's sign-up, and Gelatin sends no email from this call.
+
+```ts
+const { status } = await gelatin.joinCityWaitlist({ email, city: "Boise, ID", consent: true, source: "empty_state" });
+// "subscribed" or "already_subscribed"
+```
+
+### Filtering by budget
+
+`@gelatinbookings/partner-sdk/budget` exports `BUDGET_BANDS`: under $300, $300–600, $600–1,000 and $1,000+, each with a `key`, a display `label` and its cent bounds. Show them as checkboxes and pass the ticked keys as `listDjs({ budget })`; several bands return DJs in any of them, and no bands means any budget.
+
+A DJ is in a band when the minimum rate they really charge is at least its lower bound and below its upper bound, so $300 exactly is in $300–600, $600 in $600–1,000 and $1,000 in $1,000+. DJs who keep their rate private are filtered on that same rate, so they still appear when they're affordable, but their `published_rate_cents` stays null. A DJ with no rate on file is in no band. Budget combines with `city` and `date`, and a `next_cursor` only continues the same bands.
+
+```ts
+import { BUDGET_BANDS } from "@gelatinbookings/partner-sdk/budget";
+
+const djs = await gelatin.listDjs({ city: "Atlanta, GA", date: "2026-11-14", budget: ["300_to_600", "600_to_1000"] });
+```
+
+### Choosing a genre
+
+Each catalog DJ carries `genres`: up to six from the DJ's profile, in the DJ's own order (an empty array when the DJ lists none). `listGenres({ city, budget })` returns the genres your DJs in that city (and budget bands, when given) list, busiest first, each with `dj_count`: how many DJs `listDjs({ city, budget, genre })` returns for its `name`. Only genres with DJs are listed, so a typeahead built from it never offers a term that finds nobody. Ask again when the city changes, and drop a picked genre the new city doesn't have.
+
+`listDjs({ genre })` ignores case, accents, spaces and punctuation, so `"Deep-House"` and `"deep house"` find the same DJs. There is no synonym list yet: `"D&B"` does not find `"Drum and Bass"`. A genre no DJ lists returns an empty page. `@gelatinbookings/partner-sdk/genres` applies the same rule with no request: `genreKey`, `filterGenres(directory, query)` for the typeahead, and `findGenre(directory, picked)` to check a picked genre against a new city.
+
+```ts
+import { findGenre } from "@gelatinbookings/partner-sdk/genres";
+
+const directory = await gelatin.listGenres({ city: "Atlanta, GA" });
+// Drop a genre picked for another city that Atlanta's DJs don't list.
+const genre = picked && findGenre(directory, picked) ? picked : undefined;
+const djs = await gelatin.listDjs({ city: "Atlanta, GA", genre, date: "2026-11-14" });
+```
+
+### After a DJ passes
+
+When a request ends without a booking (`getEventBookings` status `declined`, `expired` or `cancelled`), don't leave the slot empty. `listAlternates(eventId, requestId)` returns up to five DJs who are open that night. They're in the event's city (by name, or by a service radius that reaches a bundled city) and either publish a rate within the organizer's last offered fee plus a fifth or publish none. The DJ who passed and every DJ already asked for this event are left out. A request that is still live answers `409 request_active`.
+
+The result also carries the night, the city, the budget and your own event details, so Offer can start your usual request flow pre-filled. Reading alternates books, holds and charges nothing.
+
+```ts
+const alternates = await gelatin.listAlternates(event.external_event_id, request.request_id);
+// alternates.items: PublicDj[]; alternates.event: { name, venue_name, venue_address, starts_at, ends_at, time_zone }
+```
+
+Gelatin's own booking page shows the same list. Its Offer button returns the organizer to the `return_url` you registered, with `gelatin_request_id` (the lost request) and `gelatin_offer_dj` (the chosen DJ) added. Check that the request is one of yours, then start a new request for that DJ, for example by calling `listAlternates` again.
+
+### A public event page
+
+For a public event page, read the lineup rather than the status feed. It carries names, profile links and photos, and no prices:
+
+```ts
+const lineup = await gelatin.getEventLineup("event_123", { includePending: true, ifNoneMatch: lastEtag });
+if (lineup.modified) renderLineup(lineup.data.entries); // each entry: dj_id, name, status, profile_url, image_url
+```
+
+### Values that depend on your partner settings
+
+Three behaviours are set per partner by Gelatin and default to the full integration; ask Gelatin to change them. Field names and types never change, only the values:
+
+- `profile_url` opens the DJ's co-branded page on your registered portal origin, or Gelatin's own `/djs/{slug}` page when you have none or choose Gelatin links.
+- `city` in `listDjs`, `listGenres` and alternates, and the counts in `listCities`, include other spellings of the city and DJs whose service radius covers it. With exact-name matching, only DJs whose profile city is exactly the text you send match.
+- After a DJ passes, Gelatin's booking page can send the organizer back to your `return_url` with an Offer link (default), show the list only, or let the organizer send the offer to another DJ right there, so you need no code for alternates.
 
 ## Request and response shapes
 

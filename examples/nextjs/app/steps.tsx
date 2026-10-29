@@ -1,11 +1,7 @@
 import Link from "next/link";
+import { STEPS } from "../lib/flow";
 
-export const STEPS = [
-  { href: "/", label: "Date & DJs" },
-  { href: "/event", label: "Event" },
-  { href: "/offer", label: "Offer" },
-  { href: "/bookings", label: "Pay" },
-] as const;
+export { STEPS };
 
 /** Where the organizer is in the booking. Earlier steps link back; later ones don't. */
 export function Steps({ current }: { current: 1 | 2 | 3 | 4 }) {

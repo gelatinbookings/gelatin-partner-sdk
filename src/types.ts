@@ -16,6 +16,8 @@
  * Shapes for routes that are not live yet are at the bottom of this file.
  */
 
+import type { BudgetBand } from "./budget.js";
+
 // ─── Shared building blocks ─────────────────────────────────────────────────
 
 /** A money amount in the smallest currency unit: `{ currency: "usd", total_cents: 45000 }` is $450.00. */
@@ -30,20 +32,43 @@ export interface Money {
 export type DjTier = "verified" | "top_performer" | "resident" | "city_pillar";
 
 export interface DjCatalogQuery {
-  /** City name as Gelatin lists it, for example `"Atlanta"`. */
+  /**
+   * A city, with or without its state: `"Atlanta, GA"`, `"Atlanta"` and
+   * `"Atlanta, Georgia"` find the same DJs. Use a `label` from `listCities()`.
+   */
   city?: string;
+  /**
+   * One genre. Case, accents, spaces and punctuation are ignored, so
+   * `"Deep-House"` and `"deep house"` find the same DJs; there are no
+   * synonyms. Use a `name` from `listGenres()`. A genre no DJ has returns an
+   * empty page, not an error.
+   */
+  genre?: string;
   /** `YYYY-MM-DD`. When set, each DJ's `available` is for that night. */
   date?: string;
+  /**
+   * Budget bands from `BUDGET_BANDS` (`@gelatinbookings/partner-sdk/budget`).
+   * Returns DJs whose real minimum rate is in any of them, including DJs who
+   * keep their rate private (their `published_rate_cents` stays null). A DJ
+   * with no rate on file is in no band. Empty or omitted means any budget.
+   */
+  budget?: readonly BudgetBand[];
   /** `next_cursor` from the previous page. */
   cursor?: string;
   /** Page size, 1–100. Defaults to 20. */
   limit?: number;
 }
 
-/** How many people the DJ typically draws (`min`–`max`), and over what `window`. */
+/**
+ * How many people the DJ draws on a verified night (`min`–`max`, averaging
+ * `avg`), and over what `window`. Only venue-confirmed head counts count; a DJ
+ * with none has no draw (null), never a 0.
+ */
 export interface DjDraw {
   min: number;
   max: number;
+  /** Null only from a Gelatin API that predates the average. */
+  avg: number | null;
   window: string;
 }
 
@@ -53,11 +78,20 @@ export interface PublicDj {
   name: string;
   city: string;
   tier: DjTier;
-  /** The DJ's public Gelatin profile. */
+  /**
+   * The DJ's public profile: the read-only, co-branded page on your portal
+   * origin when Gelatin has one registered for you, otherwise the Gelatin profile.
+   */
   profile_url: string;
   /** An https image URL, or null when the DJ has no photo. */
   image_url: string | null;
   draw: DjDraw | null;
+  /**
+   * Up to six genres from the DJ's profile, in the DJ's own order; empty when
+   * the DJ lists none. When `listDjs` was filtered by `genre`, that genre is
+   * first. Servers older than this field send none; the SDK reads that as `[]`.
+   */
+  genres: string[];
   /** The DJ's published rate. Null means show no rate or price hint at all. */
   published_rate_cents: number | null;
   /** Advisory only: Gelatin checks availability again when you send the request. */
@@ -68,6 +102,82 @@ export interface DjCatalogPage {
   items: PublicDj[];
   /** Pass as `cursor` for the next page; null on the last page. */
   next_cursor: string | null;
+}
+
+// ─── listCities (feeds listDjs) ─────────────────────────────────────────────
+
+export interface DirectoryCity {
+  /** `"Atlanta"`. */
+  name: string;
+  /** `"Atlanta, GA"`. Pass it as `listDjs({ city })`. */
+  label: string;
+  /** DJs your catalog lists in this city. Zero is a real answer: the city is listed and can still be searched. */
+  dj_count: number;
+}
+
+export interface DirectoryRegion {
+  /** A state code, `"GA"`, or null for the cities Gelatin could not place in a state. */
+  code: string | null;
+  /** `"Georgia"`. */
+  name: string;
+  cities: DirectoryCity[];
+}
+
+export interface DirectoryCountry {
+  /** `"US"`, or null for cities Gelatin could not place in a country. */
+  code: string | null;
+  name: string;
+  regions: DirectoryRegion[];
+}
+
+/**
+ * Every US state with its major cities (the same list as `US_MAJOR_CITIES` in
+ * `@gelatinbookings/partner-sdk/places`), plus any other city where your
+ * catalog has a DJ, each with this partner's DJ count.
+ */
+export interface CityDirectory {
+  countries: DirectoryCountry[];
+}
+
+// ─── joinCityWaitlist (a city with no DJs) ──────────────────────────────────
+
+/** An organizer asks to be told when DJs are available in a city. */
+export interface CityWaitlistRequest {
+  /** The organizer's email. Gelatin stores it lower-cased; at most 254 characters. */
+  email: string;
+  /** A bundled city's `label` from `listCities`, such as `"Boise, ID"`. */
+  city: string;
+  /** Send `true` only after the organizer asked to be told; Gelatin records the time. */
+  consent: true;
+  /** Where the ask came from, as a short lower-case label such as `"empty_state"`. Defaults to `"partner_api"`. */
+  source?: string;
+}
+
+export interface CityWaitlistResult {
+  /** `already_subscribed` when this email already asked for this city through you. */
+  status: "subscribed" | "already_subscribed";
+  city: { name: string; region: string; label: string };
+}
+
+// ─── listGenres (feeds listDjs) ─────────────────────────────────────────────
+
+export interface GenreQuery {
+  /** A `listCities` label. Counts only DJs `listDjs({ city })` would return; omit for every city. */
+  city?: string;
+  /** The same bands as `listDjs({ budget })`, so each count is what that search returns. */
+  budget?: readonly BudgetBand[];
+}
+
+export interface DirectoryGenre {
+  /** `"Deep House"`: the spelling most of these DJs use. Pass it as `listDjs({ genre })`. */
+  name: string;
+  /** DJs your catalog lists with this genre, in the asked-for city. Always at least 1. */
+  dj_count: number;
+}
+
+/** Genres your catalog's DJs list, busiest first. Only genres with DJs appear, so none returns an empty page. */
+export interface GenreDirectory {
+  genres: DirectoryGenre[];
 }
 
 // ─── 2. submitBookingRequests ───────────────────────────────────────────────
@@ -252,6 +362,8 @@ export interface DjBookingStatus {
   status: PartnerBookingStatus;
   /** Goes up each time the offer changes. */
   offer_revision: number;
+  /** Mid-negotiation, whose answer the booking waits on; null once settled. */
+  pending_party: "organizer" | "dj" | null;
   /** The current organizer total, or null when there is no live offer. */
   amount: Money | null;
   actions: BookingAction[];
@@ -282,6 +394,71 @@ export type EventBookingProjection = EventBookings;
 export type ConditionalEventBookings =
   | { modified: false; etag: string | null }
   | { modified: true; etag: string | null; data: EventBookings };
+
+// ─── listAlternates (after a request is lost) ───────────────────────────────
+
+/** Your own event, as the lost offer saved it, to prefill a new request. */
+export interface AlternatesEventDetails {
+  name: string;
+  venue_name: string;
+  venue_address: string | null;
+  starts_at: string;
+  ends_at: string;
+  time_zone: string;
+}
+
+/**
+ * Who else is open for a slot a DJ passed on, let expire, or otherwise lost.
+ * Each DJ is available on `date`, in `city` (by name or service radius), and
+ * either publishes a rate within `budget` plus a fifth or publishes none. The
+ * DJ who was lost and every DJ already asked for this event are left out.
+ * Reading this books, holds and charges nothing.
+ */
+export interface DjAlternates {
+  request_id: string;
+  /** The DJ whose request was lost. */
+  dj_id: string;
+  /** The event's own calendar date, `YYYY-MM-DD`, in its time zone. */
+  date: string;
+  /** A `listCities` label, or null when Gelatin had no city to go on. */
+  city: string | null;
+  /** The organizer's last offered DJ fee. */
+  budget: { currency: string; dj_fee_cents: number };
+  event: AlternatesEventDetails;
+  /** Up to five, best rate match first. Empty is a real answer. */
+  items: PublicDj[];
+}
+
+// ─── 6. getEventLineup ──────────────────────────────────────────────────────
+
+/** `confirmed`: booked and paid. `pending`: the DJ has the offer and hasn't settled it yet. */
+export type LineupStatus = "confirmed" | "pending";
+
+/** One DJ on an event's public lineup. Display data only: no prices or booking details. */
+export interface LineupEntry {
+  dj_id: string;
+  name: string;
+  status: LineupStatus;
+  /**
+   * The DJ's public profile: the co-branded page on your portal origin when
+   * Gelatin has one registered for you, otherwise the Gelatin profile. Link to
+   * it wherever the name is shown.
+   */
+  profile_url: string;
+  /** An https image URL, or null when the DJ has no photo. */
+  image_url: string | null;
+}
+
+/** Who's playing at one of your events, safe to show on a public page. */
+export interface EventLineup {
+  external_event_id: string;
+  entries: LineupEntry[];
+}
+
+/** `getEventLineup` result, revalidated with `ifNoneMatch` like `getEventBookings`. */
+export type ConditionalEventLineup =
+  | { modified: false; etag: string | null }
+  | { modified: true; etag: string | null; data: EventLineup };
 
 // ─── Not live yet ───────────────────────────────────────────────────────────
 // Typed for an upcoming release. Their routes aren't mounted yet, so calling

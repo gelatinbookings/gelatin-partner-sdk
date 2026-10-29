@@ -44,6 +44,7 @@ const MESSAGES: Record<string, string> = {
   resource_unavailable: "Gelatin could not find that booking for this organizer.",
   unsupported_authorization_placement: "Gelatin only supports payment through its portal for now.",
   rate_limited: "Too many requests. Wait a minute and try again.",
+  request_active: "That DJ's request is still open, so there is nothing to replace yet.",
 };
 
 /**

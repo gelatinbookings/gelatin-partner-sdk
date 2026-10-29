@@ -63,6 +63,10 @@ Reload `/bookings` at any point to see the current status. The statuses the exam
 | `confirmed` | Confirmed | Nothing; the DJ is booked and paid |
 | `declined`, `expired`, `cancelled` | as named | Book another DJ |
 
+### Light or Full
+
+The header's **Integration** switch shows two ways to build this. **Full** is everything above: a city picker, genre and budget filters, verified draw, the card hold on this site and alternates on the bookings page. **Light** is the minimum: type a city, pick a DJ, send the request with `authorization_placement: "gelatin_portal_handoff"`, and go straight to Gelatin's booking page, which takes the card hold and handles counters and other DJs. The bookings list then has one **Manage in Gelatin** button per DJ. Start Light and add Full pieces one at a time. The switch is a cookie in your browser; Full is the default.
+
 ## Where the integration lives
 
 Everything that talks to Gelatin runs on the server. The browser never sees the API key.
