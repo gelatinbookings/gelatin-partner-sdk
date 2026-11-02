@@ -76,7 +76,7 @@ Each place the site calls Gelatin is commented "Gelatin call N of 5", in journey
 | Call | File | What it shows |
 | --- | --- | --- |
 | setup | [`lib/gelatin.ts`](lib/gelatin.ts) | Creating the server-only SDK client, checking launch URLs, and turning `PartnerApiError` codes into messages |
-| 1 `listDjs` | [`app/page.tsx`](app/page.tsx) | The catalog for one night, with availability and paging |
+| 1 `listDjs` | [`app/page.tsx`](app/page.tsx), [`lib/free-djs.ts`](lib/free-djs.ts) | The catalog for one night with `available: true`, so only DJs free then are listed, with paging and a "No DJs free that night" note |
 | 2 `submitBookingRequests` | [`lib/submission.ts`](lib/submission.ts), [`lib/handlers.ts`](lib/handlers.ts) | Building the request from the SDK's named types (`Organizer`, `EventDetails`, `DjRequest`), sending it, and keeping the IDs Gelatin returns |
 | 3 `createPaymentSession` | [`lib/handlers.ts`](lib/handlers.ts), [`app/pay-button.tsx`](app/pay-button.tsx) | Starting the card hold on the server, and mounting Stripe's checkout in the page |
 | 4 `createPortalLaunch` | [`lib/handlers.ts`](lib/handlers.ts), [`app/launch-button.tsx`](app/launch-button.tsx) | The one-use link to your Gelatin booking page, for counteroffers and "Manage in Gelatin" |

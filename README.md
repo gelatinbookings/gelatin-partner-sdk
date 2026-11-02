@@ -127,6 +127,16 @@ const djs = await gelatin.listDjs({ city: georgia.countries[0].regions[0].cities
 
 `listDjs({ city })` accepts a city with or without its state: `"Atlanta, GA"`, `"Atlanta"` and `"Atlanta, Georgia"` are the same city. Neither call returns coordinates or radii.
 
+### Only the DJs free that night
+
+With a `date`, every DJ carries `available` for that night. Add `available: true` to list only the DJs who are free then, so a page never holds a DJ the organizer can't book. It needs `date`. Without it, every DJ is listed with their own `available`.
+
+```ts
+const free = await gelatin.listDjs({ city: "Atlanta, GA", date: "2026-11-14", available: true });
+```
+
+Availability is advisory: a DJ can be booked between your read and your request, and Gelatin checks again when you send it (`409 dj_unavailable`). An empty page can mean nobody is free that night or nobody matches the search at all. To tell them apart, ask again without `available` (one DJ is enough), and offer a different date if DJs match.
+
 ### A city with no DJs yet
 
 When the organizer picks a city with `dj_count: 0`, say Gelatin isn't there yet and offer to tell them when DJs are. Once they say yes, send their email with the city's `label`. It needs the `requests:write` scope and counts against your write quota. Gelatin keeps one sign-up per email, city and partner: a repeat answers `already_subscribed`. The answer never contains the email or anyone else's sign-up, and Gelatin sends no email from this call.
@@ -230,6 +240,7 @@ const body: BookingRequest = {
 | `createPaymentSession` | `PaymentSessionRequest` | `PaymentSessionResult` |
 | `createPortalLaunch` | `PortalLaunchRequest` (`LaunchResource`) | `PortalLaunchResult` |
 | `getEventBookings` | your event ID | `ConditionalEventBookings`: `EventBookings` → `PartnerBooking` → `DjBookingStatus` |
+| `getOrganizerStanding` | your community ID | `OrganizerStanding` with `OwedAmount` entries (Make a Deal only) |
 
 The old names `DjRequestSubmission`, `LaunchSessionRequest`, `LaunchSessionResult` and `EventBookingProjection` still work as aliases.
 
@@ -253,6 +264,21 @@ checkout.mount("#gelatin-checkout");
 - Finishing the form doesn't place the hold by itself. Gelatin records the hold when Stripe confirms it, usually within seconds, and `getEventBookings` then shows `requested` instead of `authorization_required`.
 - It only works for the offer the organizer submitted. For a DJ's counteroffer the call answers `409 portal_required`: create a portal launch and send the organizer to Gelatin.
 - If your site sets a Content Security Policy, allow Stripe's [documented sources](https://docs.stripe.com/security/guide#content-security-policy).
+
+## Make a Deal and organizer standing
+
+> **Off by default.** Make a Deal is a per-partner setting that Gelatin turns on only by agreement. Until it is on for your integration, none of this section applies: a request with `deal: "make_a_deal"` is refused with `400 invalid_request`, and `getOrganizerStanding` answers `404 not_found`. Bookings work exactly as described above.
+
+When Gelatin enables Make a Deal for your integration, a request can say `deal: "make_a_deal"` instead of the default `confirm_and_book`. There is no card hold and no Gelatin charge: the DJ sees the offer straight away, accepting confirms the booking, and the organizer pays the DJ directly. Make a Deal needs `organizer.community_ref`, your ID for the community that runs the event.
+
+What makes the organizer pay is their community's standing. After the night, the DJ tells Gelatin whether they were paid. While a community owes a DJ, a booking request for any event it runs, or from the organizer who owes, fails with `403 organizer_owes`. Gate your own "Add talent" control on the standing instead of waiting for that refusal:
+
+```ts
+const standing = await gelatin.getOrganizerStanding(communityId, { externalUserId: userId });
+if (!standing.may_add_talent) showOwed(standing.owed); // each DJ, amount and due date, oldest first
+```
+
+The block lifts as soon as the DJ confirms payment. A booked DJ is never cancelled because money is owed. There is no standing webhook; read it when you need it. It needs the `bookings:read` scope.
 
 ## Idempotency and retries
 
@@ -279,7 +305,9 @@ Failed calls throw `PartnerApiError` with `status`, a safe `code` and the `reque
 | 400 | `invalid_request`, `invalid_query` | The input failed validation, including a `return_url` outside your registered sites. Fix it; don't retry. |
 | 401 | `unauthorized` | The key is wrong, revoked, or from the other environment |
 | 403 | `forbidden_scope` | The key lacks the scope for this call |
+| 403 | `organizer_owes` | Make a Deal only: the organizer's community owes a DJ. Read `getOrganizerStanding`; don't retry. |
 | 404 | `resource_unavailable` | The launch target doesn't exist for your partner |
+| 404 | `not_found` | `getOrganizerStanding` while Make a Deal is off for your integration |
 | 409 | `dj_unavailable` | A DJ can't take the event; `externalRequestId` names the request. Nothing in the submission was saved. |
 | 409 | `conflict`, `idempotency_conflict` | An ID or key was reused with different content |
 | 409 | `portal_required` | `createPaymentSession` on a DJ's counteroffer: send the organizer to Gelatin with a portal launch |

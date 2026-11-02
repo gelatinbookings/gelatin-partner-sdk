@@ -181,6 +181,21 @@ describe("genres for a city", () => {
     expect(listGenres).not.toHaveBeenCalled();
   });
 
+  it("counts only DJs in the ticked budget bands, so a genre it offers always finds someone", async () => {
+    const listGenres = vi.fn(async () => ({ genres: [{ name: "Techno", dj_count: 1 }] }));
+    const response = await createGenresGet(deps({ listGenres }))(get("?city=Atlanta%2C%20GA&budget=600_to_1000&budget=under_300"));
+    expect(response.status).toBe(200);
+    // Band order, as listDjs gets them.
+    expect(listGenres).toHaveBeenCalledWith({ city: "Atlanta, GA", budget: ["under_300", "600_to_1000"] });
+  });
+
+  it("refuses an unknown or repeated budget band before calling Gelatin", async () => {
+    const listGenres = vi.fn();
+    expect((await createGenresGet(deps({ listGenres }))(get("?city=Atlanta&budget=platinum"))).status).toBe(400);
+    expect((await createGenresGet(deps({ listGenres }))(get("?city=Atlanta&budget=under_300&budget=under_300"))).status).toBe(400);
+    expect(listGenres).not.toHaveBeenCalled();
+  });
+
   it("words a Gelatin failure without its body", async () => {
     const listGenres = vi.fn(async () => { throw new PartnerApiError(503, "temporarily_unavailable", "x", "req_1"); });
     const response = await createGenresGet(deps({ listGenres }))(get("?city=Atlanta"));

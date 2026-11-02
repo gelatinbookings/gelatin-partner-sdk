@@ -24,6 +24,7 @@ describe("public partner contract", () => {
       "/v1/partners/{partner}/events/{external_event_id}/dj-bookings/{request_id}/alternates",
       "/v1/partners/{partner}/events/{external_event_id}/lineup",
       "/v1/partners/{partner}/launch-sessions",
+      "/v1/partners/{partner}/organizers/{community_ref}/standing",
       "/v1/partners/{partner}/payment-sessions",
       "/v1/partners/{partner}/portal-launches",
     ].sort());
@@ -40,7 +41,28 @@ describe("public partner contract", () => {
         }
       }
     }
-    expect(ids.size).toBe(14);
+    expect(ids.size).toBe(15);
+  });
+
+  it("reads a community's standing pull-only, and refuses creates while it owes", () => {
+    const paths = spec.paths as Record<string, Record<string, { operationId: string; parameters: Array<{ name: string; in: string }>; responses: Record<string, { description?: string; content?: Record<string, { schema: { $ref: string } }> }> }>>;
+    const standing = paths["/v1/partners/{partner}/organizers/{community_ref}/standing"].get;
+    expect(standing.operationId).toBe("getOrganizerStanding");
+    expect(standing.responses["200"].content?.["application/json"].schema.$ref).toBe("#/components/schemas/OrganizerStanding");
+    expect(standing.parameters.map((parameter) => `${parameter.in}:${parameter.name}`)).toEqual(["path:partner", "path:community_ref", "query:external_user_id"]);
+    expect(paths["/v1/partners/{partner}/booking-requests"].post.responses["403"].description).toContain("organizer_owes");
+    const schemas = (spec.components as { schemas: Record<string, { properties: Record<string, unknown>; enum?: string[] }> }).schemas;
+    expect(schemas.PartnerDeal.enum).toEqual(["confirm_and_book", "make_a_deal"]);
+    expect(Object.keys(schemas.IndependentDjRequest.properties)).toContain("deal");
+    expect(Object.keys(schemas.Organizer.properties)).toContain("community_ref");
+  });
+
+  it("documents the catalog's available filter as true-only and needing a date", () => {
+    const paths = spec.paths as Record<string, Record<string, { parameters: Array<{ name: string; in: string; required?: boolean; schema: { type: string; enum?: string[] }; description: string }> }>>;
+    const available = paths["/v1/partners/{partner}/djs"].get.parameters.find((parameter) => parameter.name === "available");
+    expect(available).toMatchObject({ in: "query", schema: { type: "string", enum: ["true"] } });
+    expect(available?.required ?? false).toBe(false);
+    expect(available?.description).toMatch(/date/);
   });
 
   it("has no unresolved component references or bundled runtime dependencies", () => {

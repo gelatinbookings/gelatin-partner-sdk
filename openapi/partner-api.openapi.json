@@ -66,6 +66,17 @@
             "description": "Calendar date for advisory availability. When omitted, available is false."
           },
           {
+            "name": "available",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true"
+              ]
+            },
+            "description": "Only with date: return only the DJs free that night (every item has available true), so a page never holds a DJ the organizer can't book. Uses the same rule as available. Without it, every DJ is returned with their own available. Without date, or with any value but true, it is rejected with 400 invalid_query. A cursor from one choice is refused for the other."
+          },
+          {
             "name": "budget",
             "in": "query",
             "schema": {
@@ -1200,7 +1211,14 @@
             "$ref": "#/components/responses/Error"
           },
           "403": {
-            "$ref": "#/components/responses/Error"
+            "description": "`organizer_owes`: Make a Deal is on for your integration and the organizer's community (or the organizer themselves) owes a DJ. Refused on every event the community runs; nothing was created. Read `GET /organizers/{community_ref}/standing` and retry after the DJ confirms payment. Other 403 codes are credential errors.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
           },
           "404": {
             "description": "`not_found`: your partner integration is switched off. Contact Gelatin; retrying will not help.",
@@ -1469,6 +1487,88 @@
             }
           }
         }
+      }
+    },
+    "/v1/partners/{partner}/organizers/{community_ref}/standing": {
+      "get": {
+        "summary": "Read a community's standing",
+        "operationId": "getOrganizerStanding",
+        "security": [
+          {
+            "PartnerBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "partner",
+            "in": "path",
+            "required": true,
+            "description": "Partner slug; the bearer key must be scoped to this same partner.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "community_ref",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "external_user_id",
+            "in": "query",
+            "required": false,
+            "description": "An organizer's user ID: include their own record on your platform, exactly as a booking request from them is checked.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current standing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizerStanding"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "description": "`not_found`: Make a Deal is not enabled for your integration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Requires bookings:read. Mounted. Whether a community may add talent, and what it owes DJs directly on Make a Deal bookings: each amount, the request it came from and when it fell due. Gate your own Add talent control on `may_add_talent`. Pull-only: there is no standing webhook."
       }
     }
   },
@@ -1901,6 +2001,12 @@
           },
           "display_name": {
             "type": "string"
+          },
+          "community_ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Your ID for the community that runs the event. Required when any request is `make_a_deal`. Amounts owed attach to the community, so a colleague creating the next event cannot shed them. Set once per event; a different value later is a `409 conflict`."
           }
         }
       },
@@ -1982,6 +2088,9 @@
           },
           "initial_offer": {
             "$ref": "#/components/schemas/InitialOffer"
+          },
+          "deal": {
+            "$ref": "#/components/schemas/PartnerDeal"
           }
         }
       },
@@ -2315,6 +2424,10 @@
             "items": {
               "$ref": "#/components/schemas/StatusAction"
             }
+          },
+          "deal": {
+            "$ref": "#/components/schemas/PartnerDeal",
+            "description": "Present only for `make_a_deal`: no hold is ever required, so the request is never `authorization_required`."
           }
         }
       },
@@ -2540,6 +2653,10 @@
           "currency": {
             "type": "string",
             "pattern": "^[a-z]{3}$"
+          },
+          "deal": {
+            "$ref": "#/components/schemas/PartnerDeal",
+            "description": "Present only for `make_a_deal`, where `total_cents` is the DJ's fee, paid to the DJ directly."
           }
         }
       },
@@ -2809,6 +2926,79 @@
             "items": {
               "$ref": "#/components/schemas/PublicDj"
             }
+          }
+        }
+      },
+      "PartnerDeal": {
+        "type": "string",
+        "enum": [
+          "confirm_and_book",
+          "make_a_deal"
+        ],
+        "description": "`confirm_and_book` (the default): a card hold, charged when the DJ accepts. `make_a_deal`: no hold and no Gelatin charge; the organizer pays the DJ directly, and while their community owes a DJ it cannot add talent. Make a Deal is enabled per partner and is off by default."
+      },
+      "OwedAmount": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "external_request_id",
+          "dj_id",
+          "reason",
+          "amount",
+          "due_at"
+        ],
+        "properties": {
+          "external_request_id": {
+            "type": "string",
+            "description": "Your request the amount came from."
+          },
+          "dj_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "unpaid_fee",
+              "cancellation"
+            ],
+            "description": "`unpaid_fee`: the DJ said a Make a Deal fee was not paid. `cancellation`: the DJ's share of a late organizer cancellation under the 7-day / 48-hour policy."
+          },
+          "amount": {
+            "$ref": "#/components/schemas/MoneyTotal"
+          },
+          "due_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OrganizerStanding": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "community_ref",
+          "may_add_talent",
+          "amount_owed",
+          "owed"
+        ],
+        "properties": {
+          "community_ref": {
+            "type": "string"
+          },
+          "may_add_talent": {
+            "type": "boolean",
+            "description": "False while anything is owed. A booking request for any event the community runs is then refused with `403 organizer_owes`."
+          },
+          "amount_owed": {
+            "$ref": "#/components/schemas/MoneyTotal"
+          },
+          "owed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OwedAmount"
+            },
+            "description": "Oldest first."
           }
         }
       }

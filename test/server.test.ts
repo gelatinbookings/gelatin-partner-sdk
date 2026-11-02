@@ -102,6 +102,19 @@ describe("partner server client", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
+  it("asks for only the DJs free that night with available, and leaves it out otherwise", async () => {
+    const fetcher = vi.fn(async () => Response.json({ items: [], next_cursor: null })) as unknown as typeof fetch;
+    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/memberly", apiKey: "gel_test_private", fetch: fetcher });
+
+    await client.listDjs({ date: "2026-11-14", available: true });
+    expect(new URL((vi.mocked(fetcher).mock.calls[0] as [string])[0]).searchParams.get("available")).toBe("true");
+
+    await client.listDjs({ date: "2026-11-14", available: false });
+    await client.listDjs({ date: "2026-11-14" });
+    expect(new URL((vi.mocked(fetcher).mock.calls[1] as [string])[0]).searchParams.has("available")).toBe(false);
+    expect(new URL((vi.mocked(fetcher).mock.calls[2] as [string])[0]).searchParams.has("available")).toBe(false);
+  });
+
   it("reads a verified draw with its average, and one from an API that predates the average", async () => {
     const dj = { id: "dj_456", name: "KOYO", city: "Atlanta", tier: "verified", profile_url: "https://gelatin.example/djs/koyo", image_url: null, published_rate_cents: null, available: true };
     const fetcher = mockFetch(Response.json({
@@ -262,6 +275,43 @@ describe("partner server client", () => {
     const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: fetcher });
 
     await expect(client.getEventLineup("event_123")).rejects.toMatchObject({ code: "invalid_response" });
+  });
+
+  it("reads a community's standing, optionally for one organizer", async () => {
+    const body = {
+      community_ref: "club 1", may_add_talent: false, amount_owed: { currency: "usd", total_cents: 41_000 },
+      owed: [{ external_request_id: "request_001", dj_id: "dj_456", reason: "unpaid_fee", amount: { currency: "usd", total_cents: 41_000 }, due_at: "2026-11-15T04:00:00.000Z" }],
+    };
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json(body));
+    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/memberly", apiKey: "gel_test_private", fetch: fetcher });
+
+    expect(await client.getOrganizerStanding("club 1")).toEqual(body);
+    await client.getOrganizerStanding("club 1", { externalUserId: "user_789" });
+
+    const [[first, init], [second]] = vi.mocked(fetcher).mock.calls as Array<[string, RequestInit]>;
+    expect(new URL(first).pathname).toMatch(/\/organizers\/club%201\/standing$/);
+    expect(init.method).toBe("GET");
+    expect(new URL(second).searchParams.get("external_user_id")).toBe("user_789");
+    await expect(client.getOrganizerStanding(" ")).rejects.toThrow(TypeError);
+  });
+
+  it("rejects a standing with an unknown reason or no block flag", async () => {
+    const owed = { external_request_id: "r", dj_id: "d", reason: "late_fee", amount: { currency: "usd", total_cents: 1 }, due_at: "2026-11-15T04:00:00.000Z" };
+    for (const body of [
+      { community_ref: "c", may_add_talent: false, amount_owed: { currency: "usd", total_cents: 1 }, owed: [owed] },
+      { community_ref: "c", amount_owed: { currency: "usd", total_cents: 0 }, owed: [] },
+    ]) {
+      const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/memberly", apiKey: "gel_test_private", fetch: mockFetch(Response.json(body)) });
+      await expect(client.getOrganizerStanding("c")).rejects.toMatchObject({ code: "invalid_response" });
+    }
+  });
+
+  it("reads Make a Deal on a submission and leaves an older response unchanged", async () => {
+    const engagement = { id: "e1", external_request_id: "request_001", dj_id: "dj_456", request_id: "r1", booking_id: "b1", offer_id: "o1", revision: 1, total_cents: 50_000, currency: "usd" };
+    const deal = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/memberly", apiKey: "gel_test_private", fetch: mockFetch(Response.json({ group_id: "g", event_id: "v", engagements: [{ ...engagement, deal: "make_a_deal" }] }, { status: 201 })) });
+    expect((await deal.submitBookingRequests({ ...submission, organizer: { ...submission.organizer, community_ref: "club 1" }, requests: [{ ...submission.requests[0], deal: "make_a_deal" }] }, { idempotencyKey: "k1" })).engagements[0].deal).toBe("make_a_deal");
+    const older = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/memberly", apiKey: "gel_test_private", fetch: mockFetch(Response.json({ group_id: "g", event_id: "v", engagements: [engagement] }, { status: 201 })) });
+    expect((await older.submitBookingRequests(submission, { idempotencyKey: "k2" })).engagements[0]).not.toHaveProperty("deal");
   });
 
   it("preserves a narrow API error without including a raw response or credential", async () => {

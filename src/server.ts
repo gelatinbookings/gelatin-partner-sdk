@@ -20,6 +20,8 @@ import type {
   GenreDirectory,
   GenreQuery,
   LineupStatus,
+  OrganizerStanding,
+  PartnerDeal,
   PortalLaunchRequest,
   PortalLaunchResult,
   PaymentSessionRequest,
@@ -245,6 +247,33 @@ function bookingRequestResult(value: unknown): BookingRequestResult {
         revision: integer(row.revision),
         total_cents: integer(row.total_cents),
         currency: string(row.currency),
+        ...dealOf(row.deal),
+      };
+    }),
+  };
+}
+
+/** Absent from servers older than Make a Deal; an unknown value is a bad response. */
+function dealOf(value: unknown): { deal?: PartnerDeal } {
+  return value === undefined ? {} : { deal: literal(value, DEALS) };
+}
+const DEALS = new Set<PartnerDeal>(["confirm_and_book", "make_a_deal"]);
+
+function organizerStanding(value: unknown): OrganizerStanding {
+  const body = object(value);
+  if (typeof body.may_add_talent !== "boolean") return invalidResponse();
+  return {
+    community_ref: string(body.community_ref),
+    may_add_talent: body.may_add_talent,
+    amount_owed: amount(body.amount_owed),
+    owed: array(body.owed).map((item) => {
+      const row = object(item);
+      return {
+        external_request_id: string(row.external_request_id),
+        dj_id: string(row.dj_id),
+        reason: literal(row.reason, new Set(["unpaid_fee", "cancellation"] as const)),
+        amount: amount(row.amount),
+        due_at: string(row.due_at),
       };
     }),
   };
@@ -286,6 +315,7 @@ function eventBookings(value: unknown): EventBookings {
             // Absent from older servers: treat missing as settled (null).
             pending_party: row.pending_party === "organizer" || row.pending_party === "dj" ? row.pending_party : null,
             amount: row.amount === null ? null : amount(row.amount),
+            ...dealOf(row.deal),
             actions: array(row.actions).map((item) => {
               const action = object(item);
               return { kind: literal(action.kind, ACTIONS) as BookingActionKind, url: string(action.url) };
@@ -497,6 +527,7 @@ export function createPartnerClient(options: PartnerClientOptions) {
       if (query.city) params.set("city", query.city);
       if (query.genre) params.set("genre", query.genre);
       if (query.date) params.set("date", query.date);
+      if (query.available) params.set("available", "true");
       // Gelatin checks the band keys and answers 400 invalid_query for an unknown one.
       if (query.budget?.length) params.set("budget", [...new Set(query.budget)].join(","));
       if (query.cursor) params.set("cursor", query.cursor);
@@ -600,6 +631,17 @@ export function createPartnerClient(options: PartnerClientOptions) {
       const etag = response.headers.get("ETag");
       if (response.status === 304) return { modified: false, etag };
       return { modified: true, etag, data: await json(response, eventLineup) };
+    },
+    /**
+     * Whether a community may add talent, and what it owes DJs directly (Make
+     * a Deal). Pass the organizer's `externalUserId` to include their own record
+     * on your platform, exactly as a booking request is checked.
+     */
+    async getOrganizerStanding(communityRef: string, options: ReadOptions & { externalUserId?: string } = {}): Promise<OrganizerStanding> {
+      const { externalUserId, ...settings } = options;
+      if (!communityRef || !communityRef.trim()) throw new TypeError("A community reference is required");
+      const query = externalUserId ? `?external_user_id=${encodeURIComponent(externalUserId)}` : "";
+      return json(await request(`organizers/${encodeURIComponent(communityRef)}/standing${query}`, "GET", undefined, settings), organizerStanding);
     },
     async updateEvent(eventId: string, change: EventChange, options: WriteOptions): Promise<EventChangeResult> {
       if (!Number.isSafeInteger(change.revision) || change.revision < 1) throw new TypeError("A positive event revision is required");

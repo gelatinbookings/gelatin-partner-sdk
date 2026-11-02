@@ -47,6 +47,12 @@ export interface DjCatalogQuery {
   /** `YYYY-MM-DD`. When set, each DJ's `available` is for that night. */
   date?: string;
   /**
+   * With `date`: list only the DJs free that night, so a page never holds a
+   * DJ the organizer can't book. Needs `date`. Without it, every DJ is
+   * listed with their own `available`.
+   */
+  available?: boolean;
+  /**
    * Budget bands from `BUDGET_BANDS` (`@gelatinbookings/partner-sdk/budget`).
    * Returns DJs whose real minimum rate is in any of them, including DJs who
    * keep their rate private (their `published_rate_cents` stays null). A DJ
@@ -198,6 +204,12 @@ export interface Organizer {
   /** True if you have verified this email yourself. */
   email_verified?: boolean;
   display_name?: string;
+  /**
+   * Your ID for the community that runs the event. Required for Make a Deal.
+   * Amounts owed attach to the community, so a colleague creating the next
+   * event can't shed them. Set once per event.
+   */
+  community_ref?: string;
 }
 
 /** The event the DJs are booked for. */
@@ -224,6 +236,14 @@ export interface DjOffer {
   note?: string;
 }
 
+/**
+ * How the organizer pays. `confirm_and_book` (the default): a card hold,
+ * charged when the DJ accepts. `make_a_deal`: no hold and no charge; the
+ * organizer pays the DJ directly, and while their community owes a DJ it can't
+ * add talent. Make a Deal is enabled per partner.
+ */
+export type PartnerDeal = "confirm_and_book" | "make_a_deal";
+
 /** One DJ in the booking. Each DJ is requested, paid and answered separately. */
 export interface DjRequest {
   /** Your ID for this one DJ request. */
@@ -231,6 +251,8 @@ export interface DjRequest {
   /** `PublicDj.id`. */
   dj_id: string;
   initial_offer: DjOffer;
+  /** Defaults to `confirm_and_book`. `make_a_deal` needs `organizer.community_ref`. */
+  deal?: PartnerDeal;
 }
 
 /** Body of `submitBookingRequests`: one booking with one or more DJs. */
@@ -264,9 +286,11 @@ export interface BookingRequestEngagement {
   booking_id: string;
   offer_id: string;
   revision: number;
-  /** What the organizer pays: DJ fee plus Gelatin's service fee and card processing. Never compute this yourself. */
+  /** What the organizer pays: DJ fee plus Gelatin's service fee and card processing. Never compute this yourself. On Make a Deal, the DJ's fee, paid to the DJ directly. */
   total_cents: number;
   currency: string;
+  /** Sent only for Make a Deal; read absent as `confirm_and_book`. */
+  deal?: PartnerDeal;
 }
 
 export interface BookingRequestResult {
@@ -366,6 +390,12 @@ export interface DjBookingStatus {
   pending_party: "organizer" | "dj" | null;
   /** The current organizer total, or null when there is no live offer. */
   amount: Money | null;
+  /**
+   * Confirm & Book (a card hold, charged when the DJ accepts) or Make a Deal
+   * (no hold; the organizer pays the DJ directly and the amount is the DJ's fee).
+   * Sent only for Make a Deal; read absent as confirm_and_book.
+   */
+  deal?: PartnerDeal;
   actions: BookingAction[];
 }
 
@@ -514,4 +544,31 @@ export interface SubmissionResult {
     authorization: AuthorizationAction;
     portal_url: string;
   }>;
+}
+
+// ─── getOrganizerStanding (Make a Deal) ─────────────────────────────────────
+
+/** One amount the organizer's community owes a DJ directly. */
+export interface OwedAmount {
+  /** Your `DjRequest.external_request_id` the amount came from. */
+  external_request_id: string;
+  dj_id: string;
+  /** `unpaid_fee`: the DJ said a Make a Deal fee wasn't paid. `cancellation`: the DJ's share of a late cancellation. */
+  reason: "unpaid_fee" | "cancellation";
+  amount: Money;
+  /** When it fell due, ISO 8601. */
+  due_at: string;
+}
+
+/**
+ * Whether a community may add talent, and what it owes. Gate your own Add
+ * talent control on `may_add_talent`; a create while it is false gets
+ * `403 organizer_owes`, on every event the community runs.
+ */
+export interface OrganizerStanding {
+  community_ref: string;
+  may_add_talent: boolean;
+  amount_owed: Money;
+  /** Oldest first. */
+  owed: OwedAmount[];
 }

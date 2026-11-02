@@ -5,6 +5,7 @@ import {
   clearCookies, cookieNames, hasValidSession, issueSession, readBookings, readCookie, serializeCookie, writeBookings, type DemoBooking,
 } from "./cookies";
 import { PartnerApiError } from "@gelatinbookings/partner-sdk/server";
+import { BUDGET_BANDS, isBudgetBand, orderBudgetBands, type BudgetBand } from "@gelatinbookings/partner-sdk/budget";
 import { approvedLaunchUrl, describeGelatinError, gelatinClient, type GelatinClient } from "./gelatin";
 import { sameSecret } from "./signed";
 import { buildSubmission, demoBookingFormSchema, MAX_DEMO_DJS } from "./submission";
@@ -197,7 +198,13 @@ export function createAvailabilityPost(deps: HandlerDeps) {
   };
 }
 
-const genresQuerySchema = z.strictObject({ city: z.string().trim().max(100).optional() });
+const genresQuerySchema = z.strictObject({
+  city: z.string().trim().max(100).optional(),
+  // The ticked budget bands, each once, so each genre's count is what the DJ search returns.
+  budget: z.array(z.string()).max(BUDGET_BANDS.length)
+    .refine((bands) => bands.every(isBudgetBand) && new Set(bands).size === bands.length)
+    .transform((bands) => orderBudgetBands(bands as BudgetBand[])),
+});
 
 /**
  * GET /api/genres?city=: the City field changed, so the Genre field needs
@@ -214,12 +221,16 @@ export function createGenresGet(deps: HandlerDeps) {
     if (!authorized(request, config)) return json({ error: "Sign in again." }, 401);
 
     let city: string | undefined;
+    let budget: BudgetBand[];
     try {
-      city = genresQuerySchema.parse(Object.fromEntries(new URL(request.url).searchParams)).city || undefined;
+      const params = new URL(request.url).searchParams;
+      const query = genresQuerySchema.parse({ ...Object.fromEntries(params), budget: params.getAll("budget") });
+      city = query.city || undefined;
+      budget = query.budget;
     } catch { return json({ error: "Invalid genre request." }, 400); }
 
     try {
-      const { genres } = await deps.client(config).listGenres({ city });
+      const { genres } = await deps.client(config).listGenres({ city, ...(budget.length ? { budget } : {}) });
       return json({ genres });
     } catch (error) {
       const described = describeGelatinError(error);

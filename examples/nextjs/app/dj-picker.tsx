@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { BUDGET_BANDS, type BudgetBand } from "@gelatinbookings/partner-sdk/budget";
+import { BUDGET_BANDS, isBudgetBand, orderBudgetBands, type BudgetBand } from "@gelatinbookings/partner-sdk/budget";
 import type { CityDirectory, DirectoryGenre } from "@gelatinbookings/partner-sdk/types";
 import type { CatalogDj } from "../lib/catalog-view";
 import { cityFromAddress, cityWithNoDjs } from "../lib/city-choice";
@@ -14,9 +14,10 @@ import GenrePicker from "./genre-picker";
 import { longDate } from "./steps";
 import { TakenNotice } from "./taken-notice";
 import { useCityGenres } from "./use-city-genres";
+import { usePickedAvailability } from "./use-picked-availability";
 import { replaceDraft, useDraft } from "./use-draft";
 
-export default function DjPicker({ date, suggestedDate, city, cityChosen, budget, cities, genre: urlGenre, genres: urlGenres, droppedGenre, djs, nextHref, failure, light = false }: {
+export default function DjPicker({ date, suggestedDate, city, cityChosen, budget, cities, genre: urlGenre, genres: urlGenres, droppedGenre, djs, allBooked, nextHref, failure, light = false }: {
   date: string | null;
   /** Worked out once on the server, so server and browser render the same field. */
   suggestedDate: string;
@@ -35,7 +36,10 @@ export default function DjPicker({ date, suggestedDate, city, cityChosen, budget
   droppedGenre: string | null;
   /** The Light tier: a city and a DJ, with none of the Full extras. */
   light?: boolean;
+  /** Only DJs free on `date`. */
   djs: CatalogDj[];
+  /** None are free, yet DJs match the filters: the night is the problem, not the filters. */
+  allBooked: boolean;
   nextHref: string | null;
   failure: { message: string; requestId: string | null } | null;
 }) {
@@ -45,7 +49,8 @@ export default function DjPicker({ date, suggestedDate, city, cityChosen, budget
   const [cleared, setCleared] = useState(false);
   const [brokenImages, setBrokenImages] = useState<ReadonlySet<string>>(new Set());
   const synced = useRef<string | null>(null);
-  const genre = useCityGenres({ city, genre: urlGenre, genres: urlGenres, droppedGenre });
+  const dateInput = useRef<HTMLInputElement>(null);
+  const genre = useCityGenres({ city, budget, genre: urlGenre, genres: urlGenres, droppedGenre });
 
   // Coming back to step 1: show the night already picked, in the event's city
   // when its address names one and no city was chosen here.
@@ -77,19 +82,29 @@ export default function DjPicker({ date, suggestedDate, city, cityChosen, budget
   const emptyCity = cityWithNoDjs(cities, city);
   const selected = new Set(ready ? draft.selected.map((item) => item.id) : []);
   const noLineup = Boolean(ready && draft.noLineup);
-  // Picked earlier, but this fresh read says the DJ is no longer free that night.
+  // Picked earlier, but no longer free that night. Only free DJs are listed,
+  // so a taken pick drops out of the list; this asks Gelatin about the picks.
   // A skipped lineup has no picks to check.
-  const taken = ready && !noLineup ? takenDjs(draft, djs.filter((dj) => dj.available !== true).map((dj) => dj.id)) : [];
+  const picked = usePickedAvailability(ready && !noLineup ? draft : null);
+  const taken = ready && !noLineup ? takenDjs(draft, picked.taken) : [];
+  const changeDate = () => {
+    const input = dateInput.current;
+    if (!input) return;
+    input.focus();
+    try { input.showPicker(); } catch { /* not supported, or not allowed here: the focused field still takes typing */ }
+  };
 
   return (
     <div className="stack">
       <form className="panel filters" method="get" action="/">
-        <label className="field">Event date<input name="date" type="date" required defaultValue={date ?? suggestedDate} /></label>
+        <label className="field">Event date<input ref={dateInput} name="date" type="date" required defaultValue={date ?? suggestedDate} /></label>
         {cities
           ? <CityPicker key={city} directory={cities} value={city} onChange={genre.cityChanged} />
           : <label className="field">City<input name="city" defaultValue={city} placeholder="Any city" maxLength={100} /></label>}
         {!light && <GenrePicker genres={genre.genres} value={genre.value} loading={genre.loading} onChange={genre.choose} />}
-        {!light && <fieldset className="budget">
+        {!light && <fieldset className="budget" onChange={(event) => genre.budgetChanged(
+          orderBudgetBands([...event.currentTarget.querySelectorAll<HTMLInputElement>('input[name="budget"]:checked')].map((input) => input.value).filter(isBudgetBand)),
+        )}>
           <legend className="field">Budget <span className="hint">Any if none ticked</span></legend>
           <div className="budget-options">
             {BUDGET_BANDS.map((band) => (
@@ -100,7 +115,7 @@ export default function DjPicker({ date, suggestedDate, city, cityChosen, budget
             ))}
           </div>
         </fieldset>}
-        <button className="button" type="submit" disabled={genre.loading}>{date ? "Update" : "Show available DJs"}</button>
+        <button className="button" type="submit" disabled={genre.loading}>{date ? "Update" : "Show free DJs"}</button>
       </form>
 
       {genre.notice && <p className="notice notice-info" role="status">{genre.notice}</p>}
@@ -114,7 +129,7 @@ export default function DjPicker({ date, suggestedDate, city, cityChosen, budget
       {date && (
         <section className="panel" aria-labelledby="catalog-title">
           <div className="panel-head">
-            <h2 id="catalog-title">DJs on {longDate(date)}</h2>
+            <h2 id="catalog-title">DJs free on {longDate(date)}</h2>
             <span className="hint">{selected.size ? `${selected.size} of ${MAX_DRAFT_DJS} picked` : `Pick up to ${MAX_DRAFT_DJS}`}</span>
           </div>
           {failure ? (
@@ -122,6 +137,14 @@ export default function DjPicker({ date, suggestedDate, city, cityChosen, budget
               <p className="notice notice-error" role="alert">
                 {failure.message}{failure.requestId && <> <span className="mono">Request {failure.requestId}</span></>}
               </p>
+            </div>
+          ) : djs.length === 0 && allBooked ? (
+            <div className="night-empty">
+              <h3>No DJs free that night</h3>
+              <p className="hint">
+                Every DJ who matches{city || urlGenre || budget.length ? " your search" : ""} is booked, held or off on {longDate(date)}. Try another night.
+              </p>
+              <button className="button-secondary" type="button" onClick={changeDate}>Change the date</button>
             </div>
           ) : djs.length === 0 && emptyCity ? (
             <CityWaitlist key={emptyCity.label} city={emptyCity} />
@@ -137,9 +160,8 @@ export default function DjPicker({ date, suggestedDate, city, cityChosen, budget
             <ul className="dj-list">
               {djs.map((dj) => {
                 const picked = selected.has(dj.id);
-                const free = dj.available === true;
                 return (
-                  <li key={dj.id} className="dj-row" data-selected={picked} data-unavailable={!free}>
+                  <li key={dj.id} className="dj-row" data-selected={picked}>
                     {dj.imageUrl && !brokenImages.has(dj.id)
                       // eslint-disable-next-line @next/next/no-img-element -- Gelatin-hosted image, sized by CSS.
                       ? <img className="avatar avatar-photo" src={dj.imageUrl} alt="" loading="lazy" width={42} height={42}
@@ -158,10 +180,9 @@ export default function DjPicker({ date, suggestedDate, city, cityChosen, budget
                         </span>
                       )}
                     </span>
-                    <span className={free ? "tag tag-ok" : "tag tag-no"}>{free ? "Available" : "Unavailable"}</span>
                     <button
                       className={picked ? "button" : "button-secondary"} type="button"
-                      disabled={!ready || (!free && !picked)} aria-pressed={picked}
+                      disabled={!ready} aria-pressed={picked}
                       aria-label={`${picked ? "Remove" : "Add"} ${dj.name}`}
                       onClick={() => {
                         if (!draft) return;
@@ -220,7 +241,7 @@ export default function DjPicker({ date, suggestedDate, city, cityChosen, budget
           <span className="hint">
             {ready && draft.selected.length
               ? draft.selected.map((item) => item.name).join(", ")
-              : noLineup ? "No lineup. Nothing will be sent to a DJ." : light ? "Add at least one available DJ." : "Add at least one available DJ, or skip the lineup."}
+              : noLineup ? "No lineup. Nothing will be sent to a DJ." : light ? "Add at least one DJ." : "Add at least one DJ, or skip the lineup."}
           </span>
           <button className="button" type="button" disabled={!ready || !lineupChosen(draft)} onClick={() => draft && router.push(nextStepHref("/", draft))}>
             Continue to event details
