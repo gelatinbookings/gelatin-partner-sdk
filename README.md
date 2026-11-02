@@ -167,6 +167,33 @@ The Next.js example's [`app/pay-button.tsx`](examples/nextjs/app/pay-button.tsx)
 - **A second click returns the same checkout.** Gelatin keeps one open hold per offer and returns it whichever idempotency key asks, so a double click or a retry never makes two holds.
 - **`409 offer_changed`:** the offer changed, was already paid, or expired. Read status before offering payment again.
 
+## One checkout for every DJ (saved card)
+
+> **Off by default, testing only.** This is a per-partner switch that Gelatin sets for you (`organizer_card_mode`: `per_hold`, the default, or `saved_card`). It isn't released for live money until the consent wording, Gelatin's Terms and your agreement to it are signed off. Until then the consent text is a draft and is labelled as one.
+
+With it on, an organizer booking several DJs enters their card once instead of once per DJ. Gelatin still holds and charges each DJ separately.
+
+**What the organizer sees, on the portal's event page (`/partner/event`, "All DJs for this event"):**
+
+1. A "Pay once for your DJs" panel lists the DJs whose offers are waiting for a hold, with the total, and a consent checkbox.
+2. "Save card and hold for …" opens one embedded Stripe Checkout in **setup mode**. It saves the card and charges nothing.
+3. Gelatin then places **one hold per DJ** on that card, each for that DJ's own total. Each is a manual-capture hold, charged only if that DJ accepts, exactly like a Checkout hold. A hold the bank wants confirmed (3-D Secure) is completed on the same page.
+4. Next time, the panel reads "Hold with your saved card" and holds in one click. The card is removed from Stripe once all of the organizer's bookings with you are settled.
+
+**How you get the organizer there:**
+
+- **No launch opens the event page directly.** `createPortalLaunch` (`kind: "request"` or `"booking"`) opens that one DJ's page. The session covers the whole event, so "All DJs for this event" on that page reaches the panel. Gelatin's own emails to the organizer open the event page directly.
+- **Light partners need no change.** Keep launching as you do. The panel appears for organizers of a partner with the switch on.
+- **Full partners:** `createPaymentSession` is unchanged. It is still one DJ per session, in payment mode, and there is **no in-page "one checkout" for your own page yet**. To offer one checkout for several DJs, send the organizer to the portal with a launch.
+
+**What you'll see per DJ in `getEventBookings`:** the same statuses as today, with no new values.
+
+- **While Gelatin places a hold in the background:** `authorization_required` until the hold is confirmed, then `requested`.
+- **A background hold the card refuses:** that DJ stays `authorization_required` (`reauthorization_required` after a counteroffer). Gelatin emails the organizer a "payment needed" link, and that DJ's page offers to authorize with the same card or another. If the organizer is on your site, mint a `createPortalLaunch` for that request. Other DJs' holds are unaffected.
+- **A new offer is held again automatically** on the saved card. This covers a DJ's counteroffer the organizer accepts and the organizer's own counteroffer. The new hold is placed first and the old one released after. The DJ reads `reauthorization_required` until the new hold is in place, then moves on exactly as with a Checkout hold. You don't need to do anything.
+
+**Coming:** a receipt email to the organizer for every hold, and per-organizer hold limits.
+
 ## Finding DJs
 
 ### Choosing a city
