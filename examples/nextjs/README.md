@@ -88,7 +88,7 @@ Every request and response shape is a named, commented type in the SDK's [`src/t
 Rules the code follows that your site should too:
 
 - **Keep the key on the server.** Read it from the environment, call Gelatin only from server code, and never send it to the browser.
-- **Use your own stable IDs.** `external_booking_id`, `external_event_id` and each `external_request_id` should be IDs from your database. Gelatin accepts each booking ID once, so a double click or a retry is the same booking, not a second one.
+- **Send your own stable event and organizer IDs.** `external_event_id` and the organizer's `external_user_id` should be IDs from your database. This example sends no booking or request IDs: Gelatin makes them, and the SDK keys the write on a hash of the request, so a double click or a retry is the same booking, not a second one. A `409 dj_unavailable` names the DJ in `djId`.
 - **Keep one organizer ID per person.** Gelatin remembers the email it first saw for an `external_user_id`, so use your user's stable ID, and launch with the same organizer ID the booking was submitted with.
 - **Create the launch when the organizer clicks, then redirect at once.** A launch link works once and expires after about 60 seconds, so don't put one in an email or keep it for later.
 - **Only redirect to your booking page.** Check that the launch URL is on your Gelatin booking page origin before sending the browser there, as `approvedLaunchUrl` does.

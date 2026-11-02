@@ -42,10 +42,10 @@ export function organizerIdFor(email: string) {
  * The body is built from the SDK's named parts (see `BookingRequest` in the
  * SDK's types), so each piece below matches one type.
  *
- * Every external ID comes from the form's nonce. In your site they'd be IDs
- * from your database. Because they're stable, a double submit is the same
- * booking: the SDK's default idempotency key is `booking:<external_booking_id>`,
- * and Gelatin accepts each booking ID once.
+ * The only IDs sent are the event's (from the form's nonce; in your site, your
+ * event ID) and the organizer's. Gelatin makes the booking and request IDs.
+ * A double submit builds the same body, and the SDK's default idempotency key
+ * is a hash of the body, so Gelatin answers it with the original booking.
  */
 export function buildSubmission(form: DemoBookingForm, publicOrigin: string, placement: "partner_event_flow" | "gelatin_portal_handoff" = "partner_event_flow"): {
   submission: BookingRequest;
@@ -78,8 +78,7 @@ export function buildSubmission(form: DemoBookingForm, publicOrigin: string, pla
 
   // One entry per DJ. Each is paid and answered on its own. The fee is what the
   // DJ gets; Gelatin adds its fees and answers with the organizer's total.
-  const requests: DjRequest[] = form.djs.map((dj, index) => ({
-    external_request_id: `demo-req-${form.nonce}-${index + 1}`,
+  const requests: DjRequest[] = form.djs.map((dj) => ({
     dj_id: dj.id,
     initial_offer: { currency: "usd", dj_fee_cents: dj.fee_dollars * 100, ...(form.note ? { note: form.note } : {}) },
   }));
@@ -92,8 +91,6 @@ export function buildSubmission(form: DemoBookingForm, publicOrigin: string, pla
   return {
     submission: {
       external_event_id: eventId,
-      external_submission_id: `demo-sub-${form.nonce}`,
-      external_booking_id: `demo-bkg-${form.nonce}`,
       organizer,
       event,
       requests,

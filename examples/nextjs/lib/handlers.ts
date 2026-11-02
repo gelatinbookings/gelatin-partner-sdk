@@ -10,7 +10,7 @@ import { approvedLaunchUrl, describeGelatinError, gelatinClient, type GelatinCli
 import { sameSecret } from "./signed";
 import { buildSubmission, demoBookingFormSchema, MAX_DEMO_DJS } from "./submission";
 import { parseTier, placementFor } from "./tier";
-import { checkPickedAvailability, djIdForUnavailableRequest } from "./availability";
+import { checkPickedAvailability, unavailableDjId } from "./availability";
 
 export type HandlerDeps = {
   config: () => DemoConfig;
@@ -158,8 +158,7 @@ export function createBookingPost(deps: HandlerDeps) {
       // A DJ was booked since the organizer picked them. Say which one, so the
       // page can offer to remove them instead of showing only an error.
       if (error instanceof PartnerApiError && error.code === "dj_unavailable") {
-        const nonce = built.submission.external_event_id.replace(/^demo-evt-/, "");
-        const djId = djIdForUnavailableRequest(error.externalRequestId, nonce, built.submission.requests.map((item) => ({ id: item.dj_id })));
+        const djId = unavailableDjId(error.djId, built.submission.requests.map((item) => ({ id: item.dj_id })));
         return json({ error: described.message, request_id: described.requestId, code: "dj_unavailable", dj_ids: djId ? [djId] : [] }, 409);
       }
       return json({ error: described.message, request_id: described.requestId }, described.status);

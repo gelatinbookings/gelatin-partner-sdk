@@ -246,8 +246,11 @@ export type PartnerDeal = "confirm_and_book" | "make_a_deal";
 
 /** One DJ in the booking. Each DJ is requested, paid and answered separately. */
 export interface DjRequest {
-  /** Your ID for this one DJ request. */
-  external_request_id: string;
+  /**
+   * Optional: your ID for this one DJ request. Left out, Gelatin derives one
+   * (`gelatin:…`) and returns it; use `request_id` to refer to the request.
+   */
+  external_request_id?: string;
   /** `PublicDj.id`. */
   dj_id: string;
   initial_offer: DjOffer;
@@ -257,12 +260,16 @@ export interface DjRequest {
 
 /** Body of `submitBookingRequests`: one booking with one or more DJs. */
 export interface BookingRequest {
-  /** Your event ID. You read status back with it. */
+  /** Your event ID. You read status back with it. Required. */
   external_event_id: string;
-  /** Your ID for this send of the form. */
-  external_submission_id: string;
-  /** Your booking ID. Gelatin accepts each one once, so a retry is never a second booking. */
-  external_booking_id: string;
+  /** @deprecated Accepted and ignored by Gelatin. Leave it out. */
+  external_submission_id?: string;
+  /**
+   * Optional: your booking ID. Gelatin accepts each one once, so a retry is
+   * never a second booking. Left out, the Idempotency-Key does that job, and a
+   * later send under a new key adds DJs to the same event.
+   */
+  external_booking_id?: string;
   organizer: Organizer;
   event: EventDetails;
   requests: DjRequest[];
@@ -277,7 +284,7 @@ export type DjRequestSubmission = BookingRequest;
 /** What Gelatin created for one DJ. Store these IDs with your event. */
 export interface BookingRequestEngagement {
   id: string;
-  /** Your `DjRequest.external_request_id`. */
+  /** Your `DjRequest.external_request_id`, or the one Gelatin derived when you left it out. */
   external_request_id: string;
   dj_id: string;
   /** Pass to `createPaymentSession` and `createPortalLaunch` as `{ kind: "request", id }`. */
@@ -544,6 +551,48 @@ export interface SubmissionResult {
     authorization: AuthorizationAction;
     portal_url: string;
   }>;
+}
+
+// ─── previewCancellation / cancelBooking ────────────────────────────────────
+
+/** Why a booking can't be cancelled now. */
+export type CancellationBlock = "event_started" | "already_cancelled" | "already_completed" | "not_cancellable";
+
+/** Which rule of the partner cancellation policy applies. */
+export type CancellationRuleCode =
+  | "free_before_acceptance"
+  | "full_refund_7_days"
+  | "half_2_to_7_days"
+  | "dj_keeps_fee_under_48_hours";
+
+/**
+ * What cancelling one DJ's booking would do now. Show `rule.text` and the
+ * amounts to the organizer before they confirm; `cancelBooking` applies the
+ * same plan. On Make a Deal nothing is refunded and `dj_keeps_cents` is what
+ * the organizer owes the DJ directly.
+ */
+export interface CancellationPreview {
+  booking_id: string;
+  deal: PartnerDeal;
+  cancellable: boolean;
+  /** Null when the booking can be cancelled now. */
+  blocked_reason: CancellationBlock | null;
+  currency: string;
+  /** What was charged to the organizer's card; zero while it's only held. */
+  charged_cents: number;
+  refund_cents: number;
+  dj_keeps_cents: number;
+  gelatin_keeps_cents: number;
+  /** Nothing was charged: the card hold, or an unfinished checkout, is released. */
+  hold_released: boolean;
+  rule: { code: CancellationRuleCode; text: string };
+}
+
+/** The cancellation. `dj-bookings` then shows the request as `cancelled` with a new ETag. */
+export interface CancellationResult extends CancellationPreview {
+  status: "cancelled";
+  /** The booking was cancelled before this call; no money moved again. */
+  already_cancelled: boolean;
 }
 
 // ─── getOrganizerStanding (Make a Deal) ─────────────────────────────────────

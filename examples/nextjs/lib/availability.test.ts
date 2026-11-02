@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { DjCatalogPage, DjCatalogQuery, PublicDj } from "@gelatinbookings/partner-sdk/types";
-import { checkPickedAvailability, djIdForUnavailableRequest } from "./availability";
+import { checkPickedAvailability, unavailableDjId } from "./availability";
 
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
@@ -62,15 +62,13 @@ describe("re-checking the picked DJs for the booking's night", () => {
 
 describe("which DJ a 409 dj_unavailable names", () => {
   const djs = [{ id: A }, { id: B }];
-  it("maps the request's external ID back to the DJ in that position", () => {
-    expect(djIdForUnavailableRequest("demo-req-n1-2", "n1", djs)).toBe(B);
-    expect(djIdForUnavailableRequest("demo-req-n1-1", "n1", djs)).toBe(A);
+  it("returns the DJ Gelatin named, as this booking sent it, whatever the case", () => {
+    expect(unavailableDjId(B, djs)).toBe(B);
+    expect(unavailableDjId(A.toUpperCase(), djs)).toBe(A);
   });
 
-  it("ignores an ID from another booking, out of range, or missing", () => {
-    expect(djIdForUnavailableRequest("demo-req-n2-1", "n1", djs)).toBeNull();
-    expect(djIdForUnavailableRequest("demo-req-n1-3", "n1", djs)).toBeNull();
-    expect(djIdForUnavailableRequest("demo-req-n1-0", "n1", djs)).toBeNull();
-    expect(djIdForUnavailableRequest(null, "n1", djs)).toBeNull();
+  it("ignores a DJ not in this booking, or none", () => {
+    expect(unavailableDjId("99999999-9999-4999-8999-999999999999", djs)).toBeNull();
+    expect(unavailableDjId(null, djs)).toBeNull();
   });
 });

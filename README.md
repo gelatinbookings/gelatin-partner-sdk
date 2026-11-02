@@ -61,10 +61,10 @@ const gelatin = createPartnerClient({
 // 1. List DJs. Pass the event date to get availability.
 const page = await gelatin.listDjs({ city: "Atlanta", date: "2026-11-14", limit: 20 });
 
-// 2. Send the organizer's booking request, one entry per DJ.
+// 2. Send the organizer's booking request, one entry per DJ. Only your event ID and the
+//    organizer's ID are needed; Gelatin makes the booking and request IDs, and the SDK
+//    keys the write on a hash of the request, so a retry is the same booking.
 const booking = await gelatin.submitBookingRequests({
-  external_booking_id: "booking_42",     // your ID; accepted once
-  external_submission_id: "submission_42",
   external_event_id: "event_123",
   organizer: { external_user_id: "user_7", email: "organizer@example.com", display_name: "Sam Rivera" },
   event: {
@@ -76,7 +76,7 @@ const booking = await gelatin.submitBookingRequests({
     venue_address: "123 Example St, Atlanta, GA 30303", // optional; the DJ sees it
   },
   requests: [
-    { external_request_id: "req_1", dj_id: page.items[0].id, initial_offer: { currency: "usd", dj_fee_cents: 30000 } },
+    { dj_id: page.items[0].id, initial_offer: { currency: "usd", dj_fee_cents: 30000 } },
   ],
   authorization_placement: "partner_event_flow", // Full; "gelatin_portal_handoff" for Light (step 3)
   return_url: "https://your-site.example/events/event_123",
@@ -303,12 +303,10 @@ const event: EventDetails = {
   venue_name: "The Warehouse",
 };
 const requests: DjRequest[] = [
-  { external_request_id: "req_1", dj_id: "<PublicDj.id>", initial_offer: { currency: "usd", dj_fee_cents: 30000 } },
+  { dj_id: "<PublicDj.id>", initial_offer: { currency: "usd", dj_fee_cents: 30000 } },
 ];
 const body: BookingRequest = {
   external_event_id: "event_123",
-  external_submission_id: "submission_42",
-  external_booking_id: "booking_42",
   organizer,
   event,
   requests,
@@ -327,6 +325,28 @@ const body: BookingRequest = {
 | `getOrganizerStanding` | your community ID | `OrganizerStanding` with `OwedAmount` entries (Make a Deal only) |
 
 The old names `DjRequestSubmission`, `LaunchSessionRequest`, `LaunchSessionResult` and `EventBookingProjection` still work as aliases.
+
+## IDs you send (proposed)
+
+A submission needs two of your IDs: `external_event_id` and the organizer's `external_user_id`.
+- `external_booking_id` is optional. Send it if you already have one: Gelatin accepts it once.
+- Each `external_request_id` is optional. A missing one is derived as `gelatin:…`, returned in `engagements[].external_request_id`, and named in a `409 dj_unavailable` along with `dj_id`. Use `request_id` for later calls.
+- `external_submission_id` is deprecated: Gelatin accepts and ignores it.
+
+Without a booking ID, the `Idempotency-Key` is what makes a retry the same booking, and a send under a new key is a new booking on the same event. That's how you add DJs later. The SDK's default key is a hash of the request, so a retry is safe. One consequence: asking the same DJ again later with an identical request returns the first booking. Pass your own `idempotencyKey` (or a booking ID) for a deliberate second ask.
+
+## Cancelling a booking
+
+`previewCancellation(bookingId)` says what cancelling one DJ's booking would do now; show its `rule.text` and amounts to the organizer before they confirm. `cancelBooking(bookingId)` applies the same plan. `bookingId` is the engagement's `booking_id` from `submitBookingRequests`.
+
+```ts
+const preview = await gelatin.previewCancellation(bookingId);
+if (preview.cancellable && (await confirmWithOrganizer(preview.rule.text, preview.refund_cents))) {
+  await gelatin.cancelBooking(bookingId); // key defaults to `cancel:{bookingId}`; a resend returns the same answer
+}
+```
+
+Before the DJ accepts, cancelling is free and the card hold is released. After the charge: 7 or more days out, everything is refunded except card processing; between 48 hours and 7 days, the DJ keeps half their fee; inside 48 hours, the DJ keeps all of it. Once the event starts, `cancelBooking` fails with `409 not_cancellable`. On Make a Deal nothing is refunded, and `dj_keeps_cents` is what the organizer owes the DJ directly. Afterwards `getEventBookings` shows the request as `cancelled` and `getEventLineup` drops the DJ. To change the date, cancel and send a new request.
 
 ## Paying on your page
 
@@ -368,7 +388,8 @@ The block lifts as soon as the DJ confirms payment. A booked DJ is never cancell
 
 | Call | Default `Idempotency-Key` | Why it's safe |
 | --- | --- | --- |
-| `submitBookingRequests` | `booking:<external_booking_id>` | Each external booking ID is accepted once. A resend with the same body returns the original result; a different body gets `409 conflict`. |
+| `submitBookingRequests` | `submission:<sha-256 of the request>`, or `booking:<external_booking_id>` when you send one | The same request always gets the same key, so a retry returns the original result, and different content never shares a key. With a booking ID, Gelatin accepts it once: a resend returns the original result; a different body gets `409 conflict`. |
+| `cancelBooking` | `cancel:<bookingId>` | One cancellation per booking: a resend returns the same answer. |
 | `createPortalLaunch` | a fresh random key per call | Every click needs its own one-use link. Retries of that call reuse its key. |
 | `createPaymentSession` | a fresh random key per call | Gelatin keeps one open hold per offer and returns it whichever key asks, so a second click gets the same checkout. |
 
@@ -392,7 +413,8 @@ Failed calls throw `PartnerApiError` with `status`, a safe `code` and the `reque
 | 403 | `organizer_owes` | Make a Deal only: the organizer's community owes a DJ. Read `getOrganizerStanding`; don't retry. |
 | 404 | `resource_unavailable` | The launch target doesn't exist for your partner |
 | 404 | `not_found` | `getOrganizerStanding` while Make a Deal is off for your integration |
-| 409 | `dj_unavailable` | A DJ can't take the event; `externalRequestId` names the request. Nothing in the submission was saved. |
+| 409 | `dj_unavailable` | A DJ can't take the event; `externalRequestId` names the request and, on a submission, `djId` names the DJ. Nothing in the submission was saved. |
+| 409 | `not_cancellable` | `cancelBooking` after the event has started |
 | 409 | `conflict`, `idempotency_conflict` | An ID or key was reused with different content |
 | 409 | `portal_required` | `createPaymentSession` on a DJ's counteroffer: send the organizer to Gelatin with a portal launch |
 | 409 | `offer_changed` | The offer changed, was already paid or expired; read status |
