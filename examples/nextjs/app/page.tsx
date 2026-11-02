@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { findGenre } from "@gelatinbookings/partner-sdk/genres";
-import type { CityDirectory, DjCatalogPage, GenreDirectory } from "@gelatinbookings/partner-sdk/types";
+import type { CityDirectory, GenreDirectory } from "@gelatinbookings/partner-sdk/types";
 import { budgetFromSearch, toCatalogDj } from "../lib/catalog-view";
+import { listFreeDjs, type FreeDjs } from "../lib/free-djs";
 import { describeGelatinError, gelatinClient } from "../lib/gelatin";
 import { requirePageSession } from "../lib/page-session";
 import DjPicker from "./dj-picker";
@@ -39,7 +40,8 @@ export default async function DatePage({ searchParams }: { searchParams: Promise
     gelatin.listCities().catch((): CityDirectory | null => null),
     // Gelatin call 1 of 5, part 3: `listGenres`. Only genres DJs in this city
     // list, with counts. Without it the Genre field is plain typing.
-    gelatin.listGenres({ city }).catch((): GenreDirectory | null => null),
+    // With budget bands ticked, only genres DJs in those bands list.
+    gelatin.listGenres({ city, ...(budget.length ? { budget } : {}) }).catch((): GenreDirectory | null => null),
   ]);
   // A genre picked for another city that this city's DJs don't list would
   // find nobody, so it is dropped (and the organizer told) rather than sent.
@@ -47,18 +49,20 @@ export default async function DatePage({ searchParams }: { searchParams: Promise
   const genre = light ? undefined : genres ? listed?.name : query.genre || undefined;
   const droppedGenre = !light && query.genre && genres && !listed ? query.genre : null;
 
-  const { page, failure } = await (
-    // Gelatin call 1 of 5, part 2: `listDjs`. With a `date`, each DJ's
-    // `available` is for that night. It's advisory: Gelatin checks again when
-    // the request is sent, and answers `409 dj_unavailable` if the DJ was
-    // booked meanwhile. `city` takes a label from `listCities`, `genre` a
-    // name from `listGenres`. `budget` keeps DJs whose real minimum rate is in
-    // a ticked band, private rates included.
+  const { free, failure } = await (
+    // Gelatin call 1 of 5, part 2: `listDjs` with `available: true`. Only the
+    // DJs free on the `date` come back, so the organizer never sees one they
+    // can't book. It's advisory: Gelatin checks again when the request is
+    // sent, and answers `409 dj_unavailable` if the DJ was booked meanwhile.
+    // `city` takes a label from `listCities`, `genre` a name from
+    // `listGenres`. `budget` keeps DJs whose real minimum rate is in a ticked
+    // band, private rates included.
     query.date
-      ? gelatin.listDjs({ city, genre, date: query.date, budget, cursor: droppedGenre ? undefined : query.cursor, limit: 25 })
-        .then((result: DjCatalogPage) => ({ page: result, failure: null }), (error: unknown) => ({ page: null, failure: describeGelatinError(error) }))
-      : Promise.resolve({ page: null, failure: null })
+      ? listFreeDjs(gelatin, { city, genre, budget, date: query.date, cursor: droppedGenre ? undefined : query.cursor })
+        .then((result: FreeDjs) => ({ free: result, failure: null }), (error: unknown) => ({ free: null, failure: describeGelatinError(error) }))
+      : Promise.resolve({ free: null, failure: null })
   );
+  const page = free?.page ?? null;
 
   const djs = (page?.items ?? []).map(toCatalogDj);
   const cityChosen = raw.city !== undefined;
@@ -75,7 +79,7 @@ export default async function DatePage({ searchParams }: { searchParams: Promise
       <div className="heading">
         <div>
           <h1>When is your event?</h1>
-          <p className="subtle">Pick the night first. Gelatin shows which DJs are free then, and that night becomes the booking date.</p>
+          <p className="subtle">Pick the night first. Gelatin lists the DJs free then, and that night becomes the booking date.</p>
         </div>
       </div>
       <DjPicker
@@ -89,6 +93,7 @@ export default async function DatePage({ searchParams }: { searchParams: Promise
         genres={genres?.genres ?? null}
         droppedGenre={droppedGenre}
         djs={djs}
+        allBooked={free?.allBooked ?? false}
         nextHref={page?.next_cursor ? `/?${next}` : null}
         failure={failure ? { message: failure.message, requestId: failure.requestId } : null}
         light={light}

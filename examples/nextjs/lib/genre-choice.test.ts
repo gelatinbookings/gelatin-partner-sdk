@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { genreForCity } from "./genre-choice";
+import { droppedGenreNotice, genreForCity } from "./genre-choice";
 
 const savannah = { genres: [{ name: "Deep House", dj_count: 2 }, { name: "Afrobeats", dj_count: 1 }] };
 
@@ -17,5 +17,19 @@ describe("genre when the city changes", () => {
 
   it("has nothing to do without a picked genre", () => {
     expect(genreForCity("", savannah, "Savannah, GA")).toEqual({ genre: "", notice: null });
+  });
+});
+
+describe("droppedGenreNotice with a budget", () => {
+  it("says the budget is why, so the note stays true when only the bands changed", () => {
+    expect(droppedGenreNotice("Techno", "Savannah, GA", 1)).toBe("No DJs in Savannah, GA in this budget list “Techno”, so the genre filter was cleared.");
+    expect(droppedGenreNotice("Techno", "", 2)).toBe("No DJs in any city in these budgets list “Techno”, so the genre filter was cleared.");
+    expect(droppedGenreNotice("Techno", "Savannah, GA")).toBe("No DJs in Savannah, GA list “Techno”, so the genre filter was cleared.");
+  });
+
+  it("drops a genre the city has, but not within the ticked bands", () => {
+    expect(genreForCity("Techno", { genres: [] }, "Savannah, GA", 1)).toEqual({
+      genre: "", notice: "No DJs in Savannah, GA in this budget list “Techno”, so the genre filter was cleared.",
+    });
   });
 });

@@ -15,7 +15,7 @@ Gelatin books DJs for events. A **partner** is a company with its own events web
 
 1. Your website shows a list of Gelatin DJs.
 2. The organizer picks DJs and suggests a fee. Your server sends that to Gelatin as a booking request.
-3. The organizer places a card hold for each DJ **on your page**, in Stripe's checkout form that Gelatin provides. No money moves yet. If a DJ comes back with a different price, your website sends the organizer to a **Gelatin booking page** with your logo on it to review it.
+3. The organizer places a card hold for each DJ, either **on your page** in Stripe's checkout form that Gelatin provides, or on a **Gelatin booking page** with your logo on it (see "Taking payment: two ways"). No money moves yet. If a DJ comes back with a different price, your website sends the organizer to a **Gelatin booking page** with your logo on it to review it.
 4. The organizer comes back to your website.
 5. When the DJ accepts, Gelatin takes the payment. Your server asks Gelatin for each booking's status whenever it wants to show it.
 
@@ -78,27 +78,32 @@ const booking = await gelatin.submitBookingRequests({
   requests: [
     { external_request_id: "req_1", dj_id: page.items[0].id, initial_offer: { currency: "usd", dj_fee_cents: 30000 } },
   ],
-  authorization_placement: "partner_event_flow", // your page takes the first card hold
+  authorization_placement: "partner_event_flow", // Full; "gelatin_portal_handoff" for Light (step 3)
   return_url: "https://your-site.example/events/event_123",
 });
 
-// 3. Take the card hold on your page: give these two values to the organizer's browser,
-//    which mounts Stripe's checkout with them (see "Paying on your page").
+// 3. Take payment in ONE of two ways. Not both: see "Taking payment: two ways".
+
+// EITHER Full: the organizer pays on your page, in Stripe's embedded checkout, one DJ
+//    at a time. Give these two values to that organizer's browser, which mounts the checkout.
 const { client_secret, publishable_key } = await gelatin.createPaymentSession({
   external_event_id: "event_123",
   external_user_id: "user_7",
   resource: { kind: "request", id: booking.engagements[0].request_id },
 });
 
-// 4. A DJ's counteroffer is reviewed in Gelatin: send the organizer there.
+// OR Light: the organizer pays in Gelatin's co-branded portal (submit with
+//    "gelatin_portal_handoff"). Full uses this too, for a DJ's counteroffer.
+//    The link is one-use and expires in 60 seconds, so make it on click and redirect at once.
 const launch = await gelatin.createPortalLaunch({
   external_event_id: "event_123",
   external_user_id: "user_7",
   resource: { kind: "request", id: booking.engagements[0].request_id },
   return_url: "https://your-site.example/events/event_123",
 });
-// Redirect immediately: the link works once and expires in 60 seconds.
 redirect(launch.url);
+
+// 4. The organizer comes back to your return_url.
 
 // 5. Read status whenever you need it, by your own event ID.
 const status = await gelatin.getEventBookings("event_123");
@@ -109,6 +114,58 @@ A runnable version is in [`examples/quickstart.ts`](examples/quickstart.ts).
 For a complete website, see the [Next.js partner example](examples/nextjs/README.md): a small events site you can run against the sandbox and click through the whole journey, including payment, the DJ's reply and live status.
 
 Gelatin never calls your server. Status is pull-only: read it when the organizer comes back, when they open the event, or on a schedule. Pass `{ ifNoneMatch: lastEtag }` to skip unchanged reads: the result is `{ modified: false }` until something changes, then `{ modified: true, etag, data }`.
+
+## Taking payment: two ways
+
+Gelatin always takes the payment. The organizer places a card hold for each DJ, and Gelatin charges it when the DJ accepts. Your choice is **where the organizer types their card**: on Gelatin's co-branded booking page (Light) or on your own page (Full). Choose when you submit, with `authorization_placement`. `createPortalLaunch` is the Light payment step. `createPaymentSession` is the Full one.
+
+| | Light: pay in Gelatin's portal | Full: Stripe checkout on your page |
+| --- | --- | --- |
+| Submit with | `authorization_placement: "gelatin_portal_handoff"` | `authorization_placement: "partner_event_flow"` |
+| Payment call | `createPortalLaunch`, then redirect | `createPaymentSession` on your server, plus Stripe.js in the browser |
+| Does the organizer leave your site? | Yes, to Gelatin's co-branded page, then back to your `return_url` | No. A DJ's counteroffer still goes to Gelatin |
+| Several DJs | One visit: from the launched DJ, "All DJs for this event" reaches the rest | One checkout per DJ |
+| Your work | One server call and a redirect | A server route, a browser component, and status reads |
+| Pick it when | You want the quickest integration | You want the organizer to stay on your page |
+| Scopes | `requests:write` (submit), `launch:write` (launch), `bookings:read` (status) | The same: `createPaymentSession` also needs `launch:write` |
+
+Listing DJs needs `catalog:read` either way, so one key with all four scopes covers both. A Full integration still calls `createPortalLaunch` for counteroffers.
+
+### Light: pay in Gelatin's portal
+
+1. Submit with `authorization_placement: "gelatin_portal_handoff"`.
+2. When the organizer clicks to pay, call `createPortalLaunch`. It returns `{ url, expires_at }`: a one-use link to Gelatin's co-branded booking page that expires in about 60 seconds. Redirect straight away, and never make one ahead of time. Each call gets a fresh key, so each click gets a new link.
+3. The organizer reviews and pays there. Gelatin's page links back to your `return_url`, whose origin must be registered with Gelatin.
+4. When they're back, read `getEventBookings`. A DJ still waiting for the card hold is `authorization_required`, and becomes `requested` once the hold is placed.
+
+### Full: Stripe checkout on your page
+
+1. Submit with `authorization_placement: "partner_event_flow"`.
+2. **Server:** `createPaymentSession({ external_event_id, external_user_id, resource: { kind: "request", id: request_id } })` returns `{ client_secret, publishable_key, total_cents, currency }`.
+3. Send only `client_secret` and `publishable_key` to **that organizer's** browser. Never log them. `total_cents` and `currency` are for your own display; never compute the total yourself.
+4. **Browser:** mount Stripe's embedded checkout with [`@stripe/stripe-js`](https://www.npmjs.com/package/@stripe/stripe-js):
+
+   ```ts
+   import { loadStripe } from "@stripe/stripe-js";
+
+   const stripe = await loadStripe(publishableKey);
+   const checkout = await stripe!.createEmbeddedCheckoutPage({
+     fetchClientSecret: async () => clientSecret,
+     onComplete: () => showConfirming(), // not "paid" yet: see step 5
+   });
+   checkout.mount("#gelatin-checkout");
+   ```
+
+5. **When it completes, don't trust the browser.** `onComplete` doesn't place the hold. Gelatin records the hold only when Stripe's signed webhook arrives, usually within seconds. Show "Confirming…" and poll `getEventBookings` from your server, or use the [browser status watcher](#browser-status-refresh), until that DJ moves from `authorization_required` to `requested`.
+
+The Next.js example's [`app/pay-button.tsx`](examples/nextjs/app/pay-button.tsx) is the working reference, with its server route in [`lib/handlers.ts`](examples/nextjs/lib/handlers.ts). [Paying on your page](#paying-on-your-page) has more detail.
+
+### Gotchas
+
+- **One DJ per payment session, today.** `resource` is always `{ kind: "request" }`, so a booking with three DJs needs three checkouts. Stripe allows one embedded checkout on a page at a time, so call `checkout.destroy()` before mounting the next.
+- **`409 portal_required` means "use the portal for this DJ".** You get it when the DJ countered, so the offer on the table is no longer the organizer's own. You also get it when that DJ's hold was already started on Gelatin's page. Fall back to `createPortalLaunch` for that request and redirect.
+- **A second click returns the same checkout.** Gelatin keeps one open hold per offer and returns it whichever idempotency key asks, so a double click or a retry never makes two holds.
+- **`409 offer_changed`:** the offer changed, was already paid, or expired. Read status before offering payment again.
 
 ## Finding DJs
 
@@ -126,6 +183,16 @@ const djs = await gelatin.listDjs({ city: georgia.countries[0].regions[0].cities
 ```
 
 `listDjs({ city })` accepts a city with or without its state: `"Atlanta, GA"`, `"Atlanta"` and `"Atlanta, Georgia"` are the same city. Neither call returns coordinates or radii.
+
+### Only the DJs free that night
+
+With a `date`, every DJ carries `available` for that night. Add `available: true` to list only the DJs who are free then, so a page never holds a DJ the organizer can't book. It needs `date`. Without it, every DJ is listed with their own `available`.
+
+```ts
+const free = await gelatin.listDjs({ city: "Atlanta, GA", date: "2026-11-14", available: true });
+```
+
+Availability is advisory: a DJ can be booked between your read and your request, and Gelatin checks again when you send it (`409 dj_unavailable`). An empty page can mean nobody is free that night or nobody matches the search at all. To tell them apart, ask again without `available` (one DJ is enough), and offer a different date if DJs match.
 
 ### A city with no DJs yet
 
@@ -230,6 +297,7 @@ const body: BookingRequest = {
 | `createPaymentSession` | `PaymentSessionRequest` | `PaymentSessionResult` |
 | `createPortalLaunch` | `PortalLaunchRequest` (`LaunchResource`) | `PortalLaunchResult` |
 | `getEventBookings` | your event ID | `ConditionalEventBookings`: `EventBookings` → `PartnerBooking` → `DjBookingStatus` |
+| `getOrganizerStanding` | your community ID | `OrganizerStanding` with `OwedAmount` entries (Make a Deal only) |
 
 The old names `DjRequestSubmission`, `LaunchSessionRequest`, `LaunchSessionResult` and `EventBookingProjection` still work as aliases.
 
@@ -253,6 +321,21 @@ checkout.mount("#gelatin-checkout");
 - Finishing the form doesn't place the hold by itself. Gelatin records the hold when Stripe confirms it, usually within seconds, and `getEventBookings` then shows `requested` instead of `authorization_required`.
 - It only works for the offer the organizer submitted. For a DJ's counteroffer the call answers `409 portal_required`: create a portal launch and send the organizer to Gelatin.
 - If your site sets a Content Security Policy, allow Stripe's [documented sources](https://docs.stripe.com/security/guide#content-security-policy).
+
+## Make a Deal and organizer standing
+
+> **Off by default.** Make a Deal is a per-partner setting that Gelatin turns on only by agreement. Until it is on for your integration, none of this section applies: a request with `deal: "make_a_deal"` is refused with `400 invalid_request`, and `getOrganizerStanding` answers `404 not_found`. Bookings work exactly as described above.
+
+When Gelatin enables Make a Deal for your integration, a request can say `deal: "make_a_deal"` instead of the default `confirm_and_book`. There is no card hold and no Gelatin charge: the DJ sees the offer straight away, accepting confirms the booking, and the organizer pays the DJ directly. Make a Deal needs `organizer.community_ref`, your ID for the community that runs the event.
+
+What makes the organizer pay is their community's standing. After the night, the DJ tells Gelatin whether they were paid. While a community owes a DJ, a booking request for any event it runs, or from the organizer who owes, fails with `403 organizer_owes`. Gate your own "Add talent" control on the standing instead of waiting for that refusal:
+
+```ts
+const standing = await gelatin.getOrganizerStanding(communityId, { externalUserId: userId });
+if (!standing.may_add_talent) showOwed(standing.owed); // each DJ, amount and due date, oldest first
+```
+
+The block lifts as soon as the DJ confirms payment. A booked DJ is never cancelled because money is owed. There is no standing webhook; read it when you need it. It needs the `bookings:read` scope.
 
 ## Idempotency and retries
 
@@ -279,7 +362,9 @@ Failed calls throw `PartnerApiError` with `status`, a safe `code` and the `reque
 | 400 | `invalid_request`, `invalid_query` | The input failed validation, including a `return_url` outside your registered sites. Fix it; don't retry. |
 | 401 | `unauthorized` | The key is wrong, revoked, or from the other environment |
 | 403 | `forbidden_scope` | The key lacks the scope for this call |
+| 403 | `organizer_owes` | Make a Deal only: the organizer's community owes a DJ. Read `getOrganizerStanding`; don't retry. |
 | 404 | `resource_unavailable` | The launch target doesn't exist for your partner |
+| 404 | `not_found` | `getOrganizerStanding` while Make a Deal is off for your integration |
 | 409 | `dj_unavailable` | A DJ can't take the event; `externalRequestId` names the request. Nothing in the submission was saved. |
 | 409 | `conflict`, `idempotency_conflict` | An ID or key was reused with different content |
 | 409 | `portal_required` | `createPaymentSession` on a DJ's counteroffer: send the organizer to Gelatin with a portal launch |

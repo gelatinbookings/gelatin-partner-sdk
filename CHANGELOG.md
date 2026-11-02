@@ -1,6 +1,23 @@
 # Changelog
 
-## 0.1.0-alpha.5 (proposed, not tagged)
+## 0.1.0-alpha.6
+
+Everything here is additive: no request field became required and no response field was removed or changed type. Code written for alpha.5 keeps working.
+
+### New
+
+- **Only the DJs free that night.** `listDjs({ date, available: true })` lists only DJs free on `date`. It needs `date`; without `available`, every DJ is listed with their own `available` as before.
+- **Make a Deal and organizer standing (off by default).** Gelatin enables these per partner, by agreement. While it is off, a `make_a_deal` request is refused with `400 invalid_request`, `getOrganizerStanding` answers `404 not_found`, and nothing else changes.
+  - `deal: "make_a_deal"` on a request (type `PartnerDeal`, default `confirm_and_book`): no card hold and no Gelatin charge, and the organizer pays the DJ directly. It needs the new `organizer.community_ref`.
+  - `getOrganizerStanding(communityRef, { externalUserId })` returns `OrganizerStanding`: `may_add_talent`, `amount_owed` and each `OwedAmount`. It needs `bookings:read`. It is pull-only; there is no webhook.
+  - While a community owes a DJ, a booking request for any of its events gets `403 organizer_owes`.
+- The OpenAPI spec covers all of the above.
+
+### Example
+
+`examples/nextjs` lists only the DJs free on the picked night. When none are free but DJs match, it says so with **Change the date**. Its genre list follows the ticked budget bands. The example doesn't use Make a Deal.
+
+## 0.1.0-alpha.5
 
 Everything here is additive: no request field became required and no response field was removed or changed type. Code written for alpha.4 keeps working.
 
