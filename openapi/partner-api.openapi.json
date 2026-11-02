@@ -1146,7 +1146,7 @@
     "/v1/partners/{partner}/booking-requests": {
       "post": {
         "summary": "Submit one partner booking with one or more DJ requests (mounted)",
-        "description": "Requires `requests:write`. Body at most 64 KiB. `authorization_placement` is `partner_event_flow` when your page takes the first card hold with `POST /payment-sessions`, or `gelatin_portal_handoff` when the organizer pays in Gelatin through a portal launch. Both stay able to use the portal, which is where a DJ's counteroffer is reviewed. `return_url` must use an origin Gelatin registered for the partner.",
+        "description": "Requires `requests:write`. Body at most 64 KiB. `authorization_placement` is `partner_event_flow` when your page takes the first card hold with `POST /payment-sessions`, or `gelatin_portal_handoff` when the organizer pays in Gelatin through a portal launch. Both stay able to use the portal, which is where a DJ's counteroffer is reviewed. `return_url` must use an origin Gelatin registered for the partner. Only `external_event_id` and `organizer.external_user_id` identify the booking; `external_booking_id` and each `external_request_id` are optional, and `external_submission_id` is deprecated and ignored. This part of the contract is still proposed.",
         "operationId": "submitBookingRequests",
         "security": [
           {
@@ -1168,7 +1168,7 @@
             "name": "Idempotency-Key",
             "in": "header",
             "required": true,
-            "description": "Stable key for one logical write. Same key and body return the original result; a changed body returns 409.",
+            "description": "Stable key for one logical write. Same key and body return the original result; a changed body returns 409. Without an `external_booking_id`, it is also what makes a retry the same booking, so reuse it for retries of the same request only. The SDK defaults it to `booking:<external_booking_id>`, or to `submission:<sha-256 of the request>` when there is no booking ID.",
             "schema": {
               "type": "string",
               "minLength": 1,
@@ -1231,7 +1231,7 @@
             }
           },
           "409": {
-            "description": "Permanent; do not retry unchanged. `dj_unavailable` (with `external_request_id`): that request's DJ is unknown, inactive, already booked, blacked out, excluded from your catalog or not yet payable. Nothing was created and the whole submission rolled back; offer another DJ or change the schedule, then submit with a new idempotency key. `conflict`: the idempotency key was reused with a different body, the `external_booking_id` was already submitted with different terms or belongs to another event or organizer, an `external_request_id` already belongs to another booking or DJ, or the `external_event_id` belongs to another organizer.",
+            "description": "Permanent; do not retry unchanged. `dj_unavailable` (with `external_request_id` and `dj_id`): that request's DJ is unknown, inactive, already booked, blacked out, excluded from your catalog or not yet payable. Nothing was created and the whole submission rolled back; offer another DJ or change the schedule, then submit with a new idempotency key. `conflict`: the idempotency key was reused with a different body, the `external_booking_id` was already submitted with different terms or belongs to another event or organizer, an `external_request_id` already belongs to another booking or DJ, or the `external_event_id` belongs to another organizer.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1244,7 +1244,8 @@
                         "code": "dj_unavailable",
                         "message": "A selected DJ is not available for this event.",
                         "request_id": "5f0c1d3e-8f4b-4f0a-9b7e-2a3c4d5e6f70",
-                        "external_request_id": "request-2"
+                        "external_request_id": "request-2",
+                        "dj_id": "3f2c8a51-6b0e-4d7a-9c1e-5a4b3c2d1e0f"
                       }
                     }
                   },
@@ -1570,6 +1571,208 @@
         },
         "description": "Requires bookings:read. Mounted. Whether a community may add talent, and what it owes DJs directly on Make a Deal bookings: each amount, the request it came from and when it fell due. Gate your own Add talent control on `may_add_talent`. Pull-only: there is no standing webhook."
       }
+    },
+    "/v1/partners/{partner}/bookings/{booking_id}/cancel/preview": {
+      "post": {
+        "summary": "Preview cancelling one DJ's booking (mounted)",
+        "description": "Requires `requests:write`. Reads only: what cancelling now would refund to the organizer, what the DJ keeps, what Gelatin keeps, and the rule in words to show before the organizer confirms. Partner policy: before the DJ accepts and the hold is charged, cancelling is free and the hold is released. After the charge: 7 or more days before the event, everything is refunded except card processing; between 48 hours and 7 days, the DJ keeps half their fee and half is refunded; inside 48 hours, the DJ keeps their whole fee. Gelatin's service fee and card processing aren't refunded inside 7 days. Once the event starts, it can't be cancelled. On Make a Deal nothing is refunded: `dj_keeps_cents` is what the organizer owes the DJ directly. A booking that can't be cancelled answers 200 with `cancellable: false` and a `blocked_reason`.",
+        "operationId": "previewCancellation",
+        "security": [
+          {
+            "PartnerBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "partner",
+            "in": "path",
+            "required": true,
+            "description": "Partner slug; the bearer key must be scoped to this same partner.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "booking_id",
+            "in": "path",
+            "required": true,
+            "description": "The engagement's `booking_id` from `submitBookingRequests` (one per DJ). Another partner's booking, or none, is the same 404.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Stable key for one logical write. Same key and body return the original result; a changed body returns 409.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What cancelling would do now",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancellationPreview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`: the booking id isn't a UUID, the body has fields (send none, or `{}`), or the `Idempotency-Key` header is missing or longer than 255 characters.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "description": "`not_found`: no booking with that id belongs to this partner.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "description": "`temporarily_unavailable`: retry after the `Retry-After` seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/partners/{partner}/bookings/{booking_id}/cancel": {
+      "post": {
+        "summary": "Cancel one DJ's booking (mounted)",
+        "description": "Requires `requests:write`. Applies the same plan the preview showed, through Gelatin's own refund and payout handling: refunds are queued and sent by Gelatin, never by this call. The DJ's request is withdrawn and the DJ is told. `dj-bookings` then shows the request as `cancelled` with a new ETag, and `lineup` drops the DJ. Partner policy: before the DJ accepts and the hold is charged, cancelling is free and the hold is released. After the charge: 7 or more days before the event, everything is refunded except card processing; between 48 hours and 7 days, the DJ keeps half their fee and half is refunded; inside 48 hours, the DJ keeps their whole fee. Gelatin's service fee and card processing aren't refunded inside 7 days. Once the event starts, it can't be cancelled. On Make a Deal nothing is refunded: `dj_keeps_cents` is what the organizer owes the DJ directly. A retry with the same `Idempotency-Key` returns the original answer; cancelling an already cancelled booking answers with what its cancellation recorded and `already_cancelled: true`, and moves no money. A date change means cancelling and sending a new request.",
+        "operationId": "cancelBooking",
+        "security": [
+          {
+            "PartnerBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "partner",
+            "in": "path",
+            "required": true,
+            "description": "Partner slug; the bearer key must be scoped to this same partner.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "booking_id",
+            "in": "path",
+            "required": true,
+            "description": "The engagement's `booking_id` from `submitBookingRequests` (one per DJ). Another partner's booking, or none, is the same 404.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Stable key for one logical write. Same key and body return the original result; a changed body returns 409.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancellationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`: the booking id isn't a UUID, the body has fields (send none, or `{}`), or the `Idempotency-Key` header is missing or longer than 255 characters.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "description": "`not_found`: no booking with that id belongs to this partner.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "description": "`temporarily_unavailable`: retry after the `Retry-After` seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`not_cancellable`: the event has started or the booking otherwise can't be cancelled now, or this `Idempotency-Key` was used to cancel a different booking.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1631,6 +1834,11 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 200
+              },
+              "dj_id": {
+                "description": "Present only on a submission's `dj_unavailable`: the DJ who cannot take the event, so a partner that left request IDs to Gelatin can tell which one.",
+                "type": "string",
+                "format": "uuid"
               }
             }
           }
@@ -2075,13 +2283,13 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "external_request_id",
           "dj_id",
           "initial_offer"
         ],
         "properties": {
           "external_request_id": {
-            "type": "string"
+            "type": "string",
+            "description": "Optional. Your ID for this DJ request. Left out, Gelatin derives one (`gelatin:…`) and returns it in `engagements[].external_request_id`; use `request_id` for later calls."
           },
           "dj_id": {
             "type": "string"
@@ -2099,8 +2307,6 @@
         "additionalProperties": false,
         "required": [
           "external_event_id",
-          "external_submission_id",
-          "external_booking_id",
           "organizer",
           "event",
           "requests",
@@ -2109,10 +2315,13 @@
         ],
         "properties": {
           "external_event_id": {
-            "type": "string"
+            "type": "string",
+            "description": "Required. Your event ID; status is read back by it."
           },
           "external_submission_id": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Deprecated: accepted and ignored. Leave it out."
           },
           "organizer": {
             "$ref": "#/components/schemas/Organizer"
@@ -2142,7 +2351,7 @@
           "external_booking_id": {
             "type": "string",
             "minLength": 1,
-            "description": "Stable partner booking identity; groups one or more independently payable DJ engagements."
+            "description": "Optional. Your booking ID: accepted once, so the same booking under any key returns the original result, and different terms are a `409 conflict`. Left out, the `Idempotency-Key` does that job: a retry under the same key returns the original result, and a later send under a new key adds DJs to the same event as its own booking. Gelatin derives the stored value (`gelatin:…`) from the event, the organizer and the key."
           }
         }
       },
@@ -2999,6 +3208,206 @@
               "$ref": "#/components/schemas/OwedAmount"
             },
             "description": "Oldest first."
+          }
+        }
+      },
+      "CancellationPreview": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "booking_id",
+          "deal",
+          "cancellable",
+          "blocked_reason",
+          "currency",
+          "charged_cents",
+          "refund_cents",
+          "dj_keeps_cents",
+          "gelatin_keeps_cents",
+          "hold_released",
+          "rule"
+        ],
+        "properties": {
+          "booking_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deal": {
+            "$ref": "#/components/schemas/PartnerDeal"
+          },
+          "cancellable": {
+            "type": "boolean"
+          },
+          "blocked_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "event_started",
+              "already_cancelled",
+              "already_completed",
+              "not_cancellable",
+              null
+            ],
+            "description": "Why it can't be cancelled now; null when it can."
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[a-z]{3}$"
+          },
+          "charged_cents": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "What was charged to the organizer's card. Zero while the card is only held."
+          },
+          "refund_cents": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "What goes back to the organizer's card."
+          },
+          "dj_keeps_cents": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Confirm & Book: what Gelatin pays the DJ from the charge. Make a Deal: what the organizer owes the DJ directly."
+          },
+          "gelatin_keeps_cents": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Gelatin's service fee and card processing kept under the policy."
+          },
+          "hold_released": {
+            "type": "boolean",
+            "description": "Nothing was charged; the card hold (or an unfinished checkout) is released."
+          },
+          "rule": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "text"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "free_before_acceptance",
+                  "full_refund_7_days",
+                  "half_2_to_7_days",
+                  "dj_keeps_fee_under_48_hours"
+                ]
+              },
+              "text": {
+                "type": "string",
+                "description": "The rule in plain words, to show the organizer before they confirm."
+              }
+            }
+          }
+        }
+      },
+      "CancellationResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "booking_id",
+          "deal",
+          "cancellable",
+          "blocked_reason",
+          "currency",
+          "charged_cents",
+          "refund_cents",
+          "dj_keeps_cents",
+          "gelatin_keeps_cents",
+          "hold_released",
+          "rule",
+          "status",
+          "already_cancelled"
+        ],
+        "properties": {
+          "booking_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deal": {
+            "$ref": "#/components/schemas/PartnerDeal"
+          },
+          "cancellable": {
+            "type": "boolean"
+          },
+          "blocked_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "event_started",
+              "already_cancelled",
+              "already_completed",
+              "not_cancellable",
+              null
+            ],
+            "description": "Why it can't be cancelled now; null when it can."
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[a-z]{3}$"
+          },
+          "charged_cents": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "What was charged to the organizer's card. Zero while the card is only held."
+          },
+          "refund_cents": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "What goes back to the organizer's card."
+          },
+          "dj_keeps_cents": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Confirm & Book: what Gelatin pays the DJ from the charge. Make a Deal: what the organizer owes the DJ directly."
+          },
+          "gelatin_keeps_cents": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Gelatin's service fee and card processing kept under the policy."
+          },
+          "hold_released": {
+            "type": "boolean",
+            "description": "Nothing was charged; the card hold (or an unfinished checkout) is released."
+          },
+          "rule": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "text"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "free_before_acceptance",
+                  "full_refund_7_days",
+                  "half_2_to_7_days",
+                  "dj_keeps_fee_under_48_hours"
+                ]
+              },
+              "text": {
+                "type": "string",
+                "description": "The rule in plain words, to show the organizer before they confirm."
+              }
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "cancelled"
+            ]
+          },
+          "already_cancelled": {
+            "type": "boolean",
+            "description": "This booking was cancelled before this call."
           }
         }
       }

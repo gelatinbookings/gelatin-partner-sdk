@@ -5,6 +5,8 @@ import type {
   BookingActionKind,
   BookingRequest,
   BookingRequestResult,
+  CancellationPreview,
+  CancellationResult,
   CityDirectory,
   CityWaitlistRequest,
   CityWaitlistResult,
@@ -56,6 +58,7 @@ const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_MAX_DELAY_MS = 10_000;
 const DEFAULT_TIMEOUT_MS = 15_000;
 const BASE_DELAY_MS = 500;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class PartnerApiError extends Error {
   constructor(
@@ -65,13 +68,15 @@ export class PartnerApiError extends Error {
     readonly requestId: string | null = null,
     /** Set on `dj_unavailable`: the `external_request_id` whose DJ cannot take the event. */
     readonly externalRequestId: string | null = null,
+    /** Set on a submission's `dj_unavailable`: the `dj_id` that cannot take the event. */
+    readonly djId: string | null = null,
   ) {
     super(message);
     this.name = "PartnerApiError";
   }
 
   toJSON() {
-    return { status: this.status, code: this.code, message: this.message, requestId: this.requestId, externalRequestId: this.externalRequestId };
+    return { status: this.status, code: this.code, message: this.message, requestId: this.requestId, externalRequestId: this.externalRequestId, djId: this.djId };
   }
 }
 
@@ -279,6 +284,34 @@ function organizerStanding(value: unknown): OrganizerStanding {
   };
 }
 
+const CANCELLATION_BLOCKS = new Set(["event_started", "already_cancelled", "already_completed", "not_cancellable"] as const);
+const CANCELLATION_RULES = new Set(["free_before_acceptance", "full_refund_7_days", "half_2_to_7_days", "dj_keeps_fee_under_48_hours"] as const);
+
+function cancellationPreview(value: unknown): CancellationPreview {
+  const body = object(value);
+  const rule = object(body.rule);
+  if (typeof body.cancellable !== "boolean" || typeof body.hold_released !== "boolean") return invalidResponse();
+  return {
+    booking_id: string(body.booking_id),
+    deal: literal(body.deal, new Set(["confirm_and_book", "make_a_deal"] as const)),
+    cancellable: body.cancellable,
+    blocked_reason: body.blocked_reason === null ? null : literal(body.blocked_reason, CANCELLATION_BLOCKS),
+    currency: string(body.currency),
+    charged_cents: integer(body.charged_cents),
+    refund_cents: integer(body.refund_cents),
+    dj_keeps_cents: integer(body.dj_keeps_cents),
+    gelatin_keeps_cents: integer(body.gelatin_keeps_cents),
+    hold_released: body.hold_released,
+    rule: { code: literal(rule.code, CANCELLATION_RULES), text: string(rule.text) },
+  };
+}
+
+function cancellationResult(value: unknown): CancellationResult {
+  const body = object(value);
+  if (body.status !== "cancelled" || typeof body.already_cancelled !== "boolean") return invalidResponse();
+  return { ...cancellationPreview(body), status: "cancelled", already_cancelled: body.already_cancelled };
+}
+
 function launchResult(value: unknown): PortalLaunchResult {
   const body = object(value);
   return { url: string(body.url), expires_at: string(body.expires_at) };
@@ -398,6 +431,26 @@ export function idempotencyKeyFor(...parts: string[]): string {
   return key;
 }
 
+/** Key order and absent fields never change the hash; anything else does. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+async function contentHash(value: unknown): Promise<string> {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) throw new TypeError("crypto.subtle is unavailable; pass an idempotencyKey");
+  const digest = await subtle.digest("SHA-256", new TextEncoder().encode(canonicalJson(value)));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 function randomKey(): string {
   const generate = globalThis.crypto?.randomUUID;
   if (typeof generate !== "function") throw new TypeError("crypto.randomUUID is unavailable; pass an idempotencyKey");
@@ -419,6 +472,12 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
     function onAbort() { clearTimeout(timer); reject(signal!.reason); }
     signal?.addEventListener("abort", onAbort, { once: true });
   });
+}
+
+/** A booking's `booking_id`: Gelatin's UUID, checked before any request. */
+function bookingRef(value: string): string {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) throw new TypeError("A booking_id UUID is required");
+  return value;
 }
 
 function externalId(value: string): string {
@@ -501,6 +560,7 @@ export function createPartnerClient(options: PartnerClientOptions) {
       let code = "http_error";
       let requestId = response.headers.get("X-Request-Id");
       let externalRequestId: string | null = null;
+      let djId: string | null = null;
       try {
         const payload = object(await response.json());
         const error = object(payload.error);
@@ -509,8 +569,9 @@ export function createPartnerClient(options: PartnerClientOptions) {
         if (typeof error.external_request_id === "string" && error.external_request_id.length > 0 && error.external_request_id.length <= 200) {
           externalRequestId = error.external_request_id;
         }
+        if (typeof error.dj_id === "string" && UUID.test(error.dj_id)) djId = error.dj_id;
       } catch { /* Do not expose untrusted response bodies. */ }
-      throw new PartnerApiError(response.status, code, "Partner API request failed", requestId, externalRequestId);
+      throw new PartnerApiError(response.status, code, "Partner API request failed", requestId, externalRequestId, djId);
     }
     return response;
   }
@@ -571,11 +632,14 @@ export function createPartnerClient(options: PartnerClientOptions) {
      * Mounted route. Use `partner_event_flow` placement when your page takes the
      * first card hold (`createPaymentSession`), or `gelatin_portal_handoff` to
      * send the organizer to Gelatin. The key defaults to
-     * `booking:<external_booking_id>`: Gelatin accepts each external booking ID
-     * once, so a resend returns the original result.
+     * `booking:<external_booking_id>` when you send a booking ID: Gelatin accepts
+     * each one once, so a resend returns the original result. Without one, it is
+     * `submission:<sha-256 of the request>`, so a retry of the same request is
+     * the same submission and different content never shares a key.
      */
     async submitBookingRequests(input: BookingRequest, options: DefaultedWriteOptions = {}): Promise<BookingRequestResult> {
-      const idempotencyKey = options.idempotencyKey ?? `booking:${input.external_booking_id}`;
+      const idempotencyKey = options.idempotencyKey
+        ?? (input.external_booking_id !== undefined ? `booking:${input.external_booking_id}` : `submission:${await contentHash(input)}`);
       return json(await request("booking-requests", "POST", input, { ...options, idempotencyKey }), bookingRequestResult);
     },
     /**
@@ -631,6 +695,25 @@ export function createPartnerClient(options: PartnerClientOptions) {
       const etag = response.headers.get("ETag");
       if (response.status === 304) return { modified: false, etag };
       return { modified: true, etag, data: await json(response, eventLineup) };
+    },
+    /**
+     * Mounted route. What cancelling one DJ's booking would do now: the
+     * refund, what the DJ keeps, and the rule in words to show the organizer
+     * before they confirm. `bookingId` is the engagement's `booking_id`.
+     * Reading this cancels nothing.
+     */
+    async previewCancellation(bookingId: string, options: DefaultedWriteOptions = {}): Promise<CancellationPreview> {
+      const idempotencyKey = options.idempotencyKey ?? randomKey();
+      return json(await request(`bookings/${bookingRef(bookingId)}/cancel/preview`, "POST", undefined, { ...options, idempotencyKey }), cancellationPreview);
+    },
+    /**
+     * Mounted route. Cancel one DJ's booking under the partner policy. The key
+     * defaults to `cancel:{bookingId}`, so a resend returns the original answer
+     * and money moves once. Refunds are queued and sent by Gelatin.
+     */
+    async cancelBooking(bookingId: string, options: DefaultedWriteOptions = {}): Promise<CancellationResult> {
+      const idempotencyKey = options.idempotencyKey ?? `cancel:${bookingId}`;
+      return json(await request(`bookings/${bookingRef(bookingId)}/cancel`, "POST", undefined, { ...options, idempotencyKey }), cancellationResult);
     },
     /**
      * Whether a community may add talent, and what it owes DJs directly (Make

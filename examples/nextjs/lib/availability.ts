@@ -45,12 +45,11 @@ export async function checkPickedAvailability(
 }
 
 /**
- * Which DJ a `409 dj_unavailable` names. The demo numbers its requests
- * `demo-req-<nonce>-<n>` in the order the DJs were sent (see submission.ts).
+ * Which DJ a `409 dj_unavailable` names. The demo leaves request IDs to
+ * Gelatin, so it goes by the error's `dj_id` (`PartnerApiError.djId`), and
+ * only when that DJ is one this booking sent.
  */
-export function djIdForUnavailableRequest(externalRequestId: string | null, nonce: string, djs: readonly { id: string }[]): string | null {
-  const prefix = `demo-req-${nonce}-`;
-  if (!externalRequestId?.startsWith(prefix)) return null;
-  const position = Number(externalRequestId.slice(prefix.length));
-  return Number.isInteger(position) && position >= 1 && position <= djs.length ? djs[position - 1].id : null;
+export function unavailableDjId(djId: string | null, djs: readonly { id: string }[]): string | null {
+  if (!djId) return null;
+  return djs.find((dj) => dj.id.toLowerCase() === djId.toLowerCase())?.id ?? null;
 }

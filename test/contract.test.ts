@@ -17,6 +17,8 @@ describe("public partner contract", () => {
       "/v1/partners/{partner}/city-waitlist",
       "/v1/partners/{partner}/genres",
       "/v1/partners/{partner}/booking-requests",
+      "/v1/partners/{partner}/bookings/{booking_id}/cancel",
+      "/v1/partners/{partner}/bookings/{booking_id}/cancel/preview",
       "/v1/partners/{partner}/dj-request-submissions",
       "/v1/partners/{partner}/events/{external_event_id}",
       "/v1/partners/{partner}/events/{external_event_id}/attendance",
@@ -41,7 +43,7 @@ describe("public partner contract", () => {
         }
       }
     }
-    expect(ids.size).toBe(15);
+    expect(ids.size).toBe(17);
   });
 
   it("reads a community's standing pull-only, and refuses creates while it owes", () => {
@@ -55,6 +57,31 @@ describe("public partner contract", () => {
     expect(schemas.PartnerDeal.enum).toEqual(["confirm_and_book", "make_a_deal"]);
     expect(Object.keys(schemas.IndependentDjRequest.properties)).toContain("deal");
     expect(Object.keys(schemas.Organizer.properties)).toContain("community_ref");
+  });
+
+  it("needs only the event and organizer IDs to submit; the rest are optional or deprecated", () => {
+    type Schema = { required?: string[]; properties: Record<string, { deprecated?: boolean; description?: string }> };
+    const schemas = (spec.components as { schemas: Record<string, Schema> }).schemas;
+    const submission = schemas.DjRequestSubmission;
+    expect(submission.required).toEqual(["external_event_id", "organizer", "event", "requests", "authorization_placement", "return_url"]);
+    expect(submission.properties.external_submission_id.deprecated).toBe(true);
+    expect(submission.properties.external_booking_id.description).toMatch(/Idempotency-Key/);
+    expect(schemas.IndependentDjRequest.required).toEqual(["dj_id", "initial_offer"]);
+    expect(schemas.Organizer.required).toContain("external_user_id");
+    const error = (schemas.ApiError.properties.error as unknown as Schema).properties;
+    expect(Object.keys(error)).toContain("dj_id");
+  });
+
+  it("previews and cancels one DJ's booking under requests:write, both returning the plan", () => {
+    const paths = spec.paths as Record<string, Record<string, { operationId: string; parameters: Array<{ name: string; in: string }>; responses: Record<string, { content?: Record<string, { schema: { $ref: string } }> }> }>>;
+    const preview = paths["/v1/partners/{partner}/bookings/{booking_id}/cancel/preview"].post;
+    const cancel = paths["/v1/partners/{partner}/bookings/{booking_id}/cancel"].post;
+    expect([preview.operationId, cancel.operationId]).toEqual(["previewCancellation", "cancelBooking"]);
+    expect(preview.responses["200"].content?.["application/json"].schema.$ref).toBe("#/components/schemas/CancellationPreview");
+    expect(cancel.responses["200"].content?.["application/json"].schema.$ref).toBe("#/components/schemas/CancellationResult");
+    expect(Object.keys(cancel.responses)).toContain("409");
+    const schemas = (spec.components as { schemas: Record<string, { required: string[] }> }).schemas;
+    expect(schemas.CancellationResult.required).toEqual(expect.arrayContaining([...schemas.CancellationPreview.required, "status", "already_cancelled"]));
   });
 
   it("documents the catalog's available filter as true-only and needing a date", () => {
@@ -89,7 +116,8 @@ describe("public partner contract", () => {
 
   it("models one partner booking with multiple independently payable DJ engagements", () => {
     const schemas = (spec.components as { schemas: Record<string, { required?: string[]; properties?: Record<string, unknown> }> }).schemas;
-    expect(schemas.DjRequestSubmission.required).toContain("external_booking_id");
+    // The booking ID is still modelled, now optional: the Idempotency-Key stands in for it.
+    expect(schemas.DjRequestSubmission.properties).toHaveProperty("external_booking_id");
     expect(schemas.SubmissionResult.required).toContain("partner_booking_id");
     expect(schemas.EventBookings.required).toContain("bookings");
     expect(schemas.EventBookings.properties?.bookings).toBeDefined();

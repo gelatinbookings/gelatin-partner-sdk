@@ -57,6 +57,35 @@ describe("default idempotency keys", () => {
     expect(keys(fetcher)).toEqual(["booking:booking_123", "booking:booking_123"]);
   });
 
+  it("without a booking ID, keys the submission on a stable hash of the event and the content", async () => {
+    const fetcher = vi.fn(async () => created());
+    const client = createPartnerClient({ baseUrl: BASE, apiKey: "gel_test_private", fetch: fetcher as unknown as typeof fetch });
+    const { external_submission_id: _s, external_booking_id: _b, ...bare } = submission;
+    const reordered = { requests: bare.requests, event: { ...bare.event }, organizer: bare.organizer, return_url: bare.return_url, authorization_placement: bare.authorization_placement, external_event_id: bare.external_event_id };
+
+    await client.submitBookingRequests(bare);
+    await client.submitBookingRequests(reordered);
+    await client.submitBookingRequests({ ...bare, requests: [{ ...bare.requests[0], initial_offer: { currency: "usd", dj_fee_cents: 60_000 } }] });
+    await client.submitBookingRequests({ ...bare, external_event_id: "event_456" });
+
+    const [first, again, otherFee, otherEvent] = keys(fetcher);
+    expect(first).toMatch(/^submission:[0-9a-f]{64}$/);
+    // A retry, even with keys in another order, is the same submission.
+    expect(again).toBe(first);
+    // Different content or another event never collides.
+    expect(new Set([first, otherFee, otherEvent]).size).toBe(3);
+  });
+
+  it("keeps booking:<id> when a booking ID is sent, with or without request IDs", async () => {
+    const fetcher = vi.fn(async () => created());
+    const client = createPartnerClient({ baseUrl: BASE, apiKey: "gel_test_private", fetch: fetcher as unknown as typeof fetch });
+    const { external_request_id: _r, ...request } = submission.requests[0];
+
+    await client.submitBookingRequests({ ...submission, requests: [request] });
+
+    expect(keys(fetcher)).toEqual(["booking:booking_123"]);
+  });
+
   it("gives every portal launch a fresh key so each click mints a new link", async () => {
     const fetcher = vi.fn(async () => launched());
     const client = createPartnerClient({ baseUrl: BASE, apiKey: "gel_test_private", fetch: fetcher as unknown as typeof fetch });

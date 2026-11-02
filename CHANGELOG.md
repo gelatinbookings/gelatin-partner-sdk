@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.1.0-alpha.7
+
+Additive for existing callers: every field you send today is still accepted, with the same retry and conflict answers. The submission contract is still *proposed*.
+
+### New
+
+- **Only two IDs to send.** `submitBookingRequests` needs only `external_event_id` and the organizer's `external_user_id`.
+  - `external_booking_id` and each `external_request_id` are now optional. Gelatin derives missing ones (`gelatin:…`) and returns request IDs in `engagements[].external_request_id`.
+  - Without a booking ID, the Idempotency-Key makes a retry the same booking, and a new key adds DJs to the same event.
+- **Default submission key.** It is `booking:<external_booking_id>` when you send one, as before. Otherwise it is `submission:<sha-256 of the request>`: the same request gets the same key, and different content never shares one.
+- **`PartnerApiError.djId`.** A submission's `409 dj_unavailable` now names the DJ as well as the request.
+- **Cancelling a booking.**
+  - `previewCancellation(bookingId)` says what cancelling would refund and what the DJ keeps, with the rule in words.
+  - `cancelBooking(bookingId)` applies it. Its key defaults to `cancel:<bookingId>`.
+  - A started event answers `409 not_cancellable`.
+- The OpenAPI spec covers all of the above.
+
+### Deprecated
+
+- `external_submission_id`: accepted and ignored. Leave it out.
+
+### Example
+
+`examples/nextjs` sends only the event and organizer IDs and finds the unavailable DJ by `djId`.
+
 ## 0.1.0-alpha.6
 
 Everything here is additive: no request field became required and no response field was removed or changed type. Code written for alpha.5 keeps working.

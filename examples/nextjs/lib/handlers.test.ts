@@ -117,10 +117,11 @@ describe("booking submission", () => {
 
     expect(response.status).toBe(201);
     expect(await response.json()).toEqual({ next: `/bookings?event=demo-evt-${form.nonce}` });
-    const [packet, options] = submitBookingRequests.mock.calls[0] as unknown as [{ external_booking_id: string; return_url: string; authorization_placement: string }, unknown];
-    // The SDK keys the write on the nonce-derived booking ID (`booking:<external_booking_id>`).
+    const [packet, options] = submitBookingRequests.mock.calls[0] as unknown as [{ external_event_id: string; return_url: string; authorization_placement: string }, unknown];
+    // Only the event ID is sent; the SDK keys the write on a hash of the request.
     expect(options).toBeUndefined();
-    expect(packet.external_booking_id).toBe(`demo-bkg-${form.nonce}`);
+    expect(packet.external_event_id).toBe(`demo-evt-${form.nonce}`);
+    expect(packet).not.toHaveProperty("external_booking_id");
     // This site takes the first card hold itself; counteroffers go to Gelatin.
     expect(packet.authorization_placement).toBe("partner_event_flow");
     expect(new URL(packet.return_url).origin).toBe(ORIGIN);
@@ -386,14 +387,14 @@ describe("Gelatin error wording", () => {
   });
 
   it("names the DJ a 409 dj_unavailable was about, so the page can offer to remove them", async () => {
-    const submitBookingRequests = vi.fn(async () => { throw new PartnerApiError(409, "dj_unavailable", "Partner API request failed", "req_9", `demo-req-${form.nonce}-1`); });
+    const submitBookingRequests = vi.fn(async () => { throw new PartnerApiError(409, "dj_unavailable", "Partner API request failed", "req_9", "gelatin:derived", DJ_ID.toUpperCase()); });
     const response = await createBookingPost(deps({ submitBookingRequests }))(post("/api/bookings", form, { cookie: sessionCookie() }));
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual(expect.objectContaining({ code: "dj_unavailable", dj_ids: [DJ_ID], request_id: "req_9" }));
   });
 
-  it("still answers a 409 dj_unavailable without a request ID it can match", async () => {
-    const submitBookingRequests = vi.fn(async () => { throw new PartnerApiError(409, "dj_unavailable", "Partner API request failed", "req_9", "someone-else-1"); });
+  it("still answers a 409 dj_unavailable that names no DJ in this booking", async () => {
+    const submitBookingRequests = vi.fn(async () => { throw new PartnerApiError(409, "dj_unavailable", "Partner API request failed", "req_9", "gelatin:derived", "99999999-9999-4999-8999-999999999999"); });
     const response = await createBookingPost(deps({ submitBookingRequests }))(post("/api/bookings", form, { cookie: sessionCookie() }));
     expect(await response.json()).toEqual(expect.objectContaining({ code: "dj_unavailable", dj_ids: [] }));
   });

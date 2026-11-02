@@ -39,15 +39,15 @@ describe("demo booking packet", () => {
     });
   });
 
-  it("derives every external ID from the form nonce, so a double submit reuses one booking ID", () => {
+  it("sends only the event ID from the form nonce, so a double submit is the same request", () => {
     const first = buildSubmission(form, "https://partner-demo.staging.gelatinbookings.com");
     const again = buildSubmission(form, "https://partner-demo.staging.gelatinbookings.com");
+    // Same body, so the SDK's default key (a hash of the request) makes a double submit one booking.
     expect(again).toEqual(first);
-    expect(first.submission.external_booking_id).toBe("demo-bkg-0b6f8f4e-8a43-4b8a-9d55-5c5f1c1e2a10");
     expect(first.submission.external_event_id).toBe("demo-evt-0b6f8f4e-8a43-4b8a-9d55-5c5f1c1e2a10");
-    expect(first.submission.requests.map((item) => item.external_request_id)).toEqual([
-      "demo-req-0b6f8f4e-8a43-4b8a-9d55-5c5f1c1e2a10-1", "demo-req-0b6f8f4e-8a43-4b8a-9d55-5c5f1c1e2a10-2",
-    ]);
+    expect(first.submission).not.toHaveProperty("external_booking_id");
+    expect(first.submission).not.toHaveProperty("external_submission_id");
+    for (const request of first.submission.requests) expect(request).not.toHaveProperty("external_request_id");
     expect(first.submission.requests[0].initial_offer).toEqual({ currency: "usd", dj_fee_cents: 45_000 });
     expect(first.submission.authorization_placement).toBe("partner_event_flow");
     expect(first.submission.return_url).toBe("https://partner-demo.staging.gelatinbookings.com/return?event=demo-evt-0b6f8f4e-8a43-4b8a-9d55-5c5f1c1e2a10");

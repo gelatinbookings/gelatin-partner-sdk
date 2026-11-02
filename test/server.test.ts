@@ -336,6 +336,21 @@ describe("partner server client", () => {
     expect((thrown as PartnerApiError).toJSON()).toMatchObject({ externalRequestId: "request_002" });
   });
 
+  it("names the DJ too, for a partner that left request IDs to Gelatin", async () => {
+    const djId = "22222222-2222-4222-8222-222222222222";
+    const fetcher = mockFetch(Response.json({ error: { code: "dj_unavailable", message: "x", request_id: "trace_3", external_request_id: "gelatin:derived", dj_id: djId } }, { status: 409 }));
+    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/memberly", apiKey: "gel_test_private", fetch: fetcher });
+
+    await expect(client.listDjs({ city: "Atlanta" })).rejects.toMatchObject({ code: "dj_unavailable", externalRequestId: "gelatin:derived", djId });
+  });
+
+  it("drops a malformed DJ reference from an error", async () => {
+    const fetcher = mockFetch(Response.json({ error: { code: "dj_unavailable", message: "x", dj_id: "not-a-uuid" } }, { status: 409 }));
+    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/memberly", apiKey: "gel_test_private", fetch: fetcher });
+
+    await expect(client.listDjs({ city: "Atlanta" })).rejects.toMatchObject({ code: "dj_unavailable", djId: null });
+  });
+
   it("drops a malformed external request reference from an error", async () => {
     const fetcher = mockFetch(Response.json({ error: { code: "dj_unavailable", message: "x", external_request_id: "x".repeat(201) } }, { status: 409 }));
     const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: fetcher });
@@ -453,6 +468,40 @@ describe("partner server client", () => {
     expect(new URL(url).pathname).toBe("/v1/partners/acme/portal-launches");
     expect(new Headers(init.headers).get("Idempotency-Key")).toBe("launch-2");
     expect(JSON.parse(String(init.body))).toEqual(input);
+  });
+
+  it("previews and cancels a booking by its booking_id, with a stable default key for the cancellation", async () => {
+    const bookingId = "0f0d1b36-0e43-4d3c-9d5d-8f6d0f1e2a10";
+    const preview = {
+      booking_id: bookingId, deal: "confirm_and_book", cancellable: true, blocked_reason: null, currency: "usd",
+      charged_cents: 57_500, refund_cents: 25_000, dj_keeps_cents: 25_000, gelatin_keeps_cents: 7_500, hold_released: false,
+      rule: { code: "half_2_to_7_days", text: "Between 2 and 7 days before the event, the DJ keeps half their fee and you get the other half back." },
+    };
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(preview))
+      .mockResolvedValueOnce(Response.json({ ...preview, status: "cancelled", already_cancelled: false }));
+    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/memberly", apiKey: "gel_test_private", fetch: fetcher });
+
+    expect(await client.previewCancellation(bookingId)).toEqual(preview);
+    expect(await client.cancelBooking(bookingId)).toEqual({ ...preview, status: "cancelled", already_cancelled: false });
+    const [[previewUrl, previewInit], [cancelUrl, cancelInit]] = vi.mocked(fetcher).mock.calls as Array<[string, RequestInit]>;
+    expect(new URL(previewUrl).pathname).toBe(`/v1/partners/memberly/bookings/${bookingId}/cancel/preview`);
+    expect(new URL(cancelUrl).pathname).toBe(`/v1/partners/memberly/bookings/${bookingId}/cancel`);
+    expect(previewInit.method).toBe("POST");
+    expect(new Headers(cancelInit.headers).get("Idempotency-Key")).toBe(`cancel:${bookingId}`);
+    expect(cancelInit.body).toBeUndefined();
+    await expect(client.cancelBooking("../events")).rejects.toThrow(TypeError);
+  });
+
+  it("rejects a cancellation with an unknown rule or a missing status", async () => {
+    const bookingId = "0f0d1b36-0e43-4d3c-9d5d-8f6d0f1e2a10";
+    const base = {
+      booking_id: bookingId, deal: "confirm_and_book", cancellable: true, blocked_reason: null, currency: "usd", charged_cents: 0,
+      refund_cents: 0, dj_keeps_cents: 0, gelatin_keeps_cents: 0, hold_released: true, rule: { code: "free_before_acceptance", text: "Free." },
+    };
+    const client = (body: unknown) => createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/memberly", apiKey: "gel_test_private", fetch: vi.fn<typeof fetch>(async () => Response.json(body)) });
+    await expect(client({ ...base, rule: { code: "goodwill", text: "x" } }).previewCancellation(bookingId)).rejects.toMatchObject({ code: "invalid_response" });
+    await expect(client(base).cancelBooking(bookingId)).rejects.toMatchObject({ code: "invalid_response" });
   });
 });
 
