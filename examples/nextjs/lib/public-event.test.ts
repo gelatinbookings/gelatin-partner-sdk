@@ -5,7 +5,7 @@ import { eventWhen, toPublicLineup } from "./public-event";
 const lineup = (entries: EventLineup["entries"]): EventLineup => ({ external_event_id: "demo-evt-1", entries });
 const entry = (overrides: Partial<EventLineup["entries"][number]> = {}): EventLineup["entries"][number] => ({
   dj_id: "dj-1", name: "Synthetic DJ Verified", status: "confirmed",
-  profile_url: "https://book-demo.example/partner/djs/synthetic-verified", image_url: "https://images.example/dj.jpg", ...overrides,
+  profile_url: "https://book-demo.example/partner/djs/synthetic-verified", profile_page_url: "https://book-demo.example/partner/djs/synthetic-verified", image_url: "https://images.example/dj.jpg", ...overrides,
 });
 
 describe("toPublicLineup", () => {
@@ -16,7 +16,7 @@ describe("toPublicLineup", () => {
   });
 
   it("keeps only https links and images from Gelatin", () => {
-    const [row] = toPublicLineup(lineup([entry({ profile_url: "javascript:alert(1)", image_url: "http://insecure.example/dj.jpg" })]));
+    const [row] = toPublicLineup(lineup([entry({ profile_url: "javascript:alert(1)", profile_page_url: "javascript:alert(1)", image_url: "http://insecure.example/dj.jpg" })]));
     expect(row).toMatchObject({ profileUrl: null, imageUrl: null });
   });
 

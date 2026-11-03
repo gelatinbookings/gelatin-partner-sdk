@@ -1903,10 +1903,16 @@
               "city_pillar"
             ]
           },
+          "profile_page_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The DJ's public profile. By default, the co-branded page on the partner's active portal origin (https://<portal origin>/djs/{slug}), or Gelatin's /djs page when it has none. Gelatin can set a partner to always link to Gelatin's /djs page. Link to this one."
+          },
           "profile_url": {
             "type": "string",
             "format": "uri",
-            "description": "The DJ's public profile. By default, the co-branded page on the partner's active portal origin, or Gelatin's /djs page when it has none. Gelatin can set a partner to always link to Gelatin's /djs page."
+            "deprecated": true,
+            "description": "Deprecated: use profile_page_url. The same page in its older form, https://<portal origin>/partner/djs/{slug} on a portal origin, which redirects (308) to profile_page_url. Kept so existing integrations keep working; no removal date yet. Without a portal origin it equals profile_page_url."
           },
           "image_url": {
             "oneOf": [
@@ -2589,9 +2595,16 @@
           "expires_at"
         ],
         "properties": {
+          "launch_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The one-use portal link, https://<portal origin>/launch#token=…. Redirect the organizer to this one straight away."
+          },
           "url": {
             "type": "string",
-            "format": "uri"
+            "format": "uri",
+            "deprecated": true,
+            "description": "Deprecated: use launch_url. The same one-use link in its older form, https://<portal origin>/partner/launch#token=…, which redirects (308) to /launch keeping the token. Kept so existing integrations keep working; no removal date yet."
           },
           "expires_at": {
             "type": "string",
@@ -3110,10 +3123,16 @@
               "pending"
             ]
           },
+          "profile_page_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The DJ's public profile. By default, the co-branded page on the partner's active portal origin (https://<portal origin>/djs/{slug}), or Gelatin's /djs page when it has none. Gelatin can set a partner to always link to Gelatin's /djs page. Link to this one."
+          },
           "profile_url": {
             "type": "string",
             "format": "uri",
-            "description": "The DJ's public profile. By default, the co-branded page on the partner's active portal origin, or Gelatin's /djs page when it has none. Gelatin can set a partner to always link to Gelatin's /djs page."
+            "deprecated": true,
+            "description": "Deprecated: use profile_page_url. The same page in its older form, https://<portal origin>/partner/djs/{slug} on a portal origin, which redirects (308) to profile_page_url. Kept so existing integrations keep working; no removal date yet. Without a portal origin it equals profile_page_url."
           },
           "image_url": {
             "oneOf": [

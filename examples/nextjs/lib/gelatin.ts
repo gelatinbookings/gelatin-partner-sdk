@@ -28,7 +28,8 @@ export function approvedLaunchUrl(value: string, portalOrigins: ReadonlySet<stri
   let url: URL;
   try { url = new URL(value); } catch { return null; }
   if (url.username || url.password || url.search) return null;
-  if (!portalOrigins.has(url.origin) || url.pathname !== "/partner/launch") return null;
+  // The portal lives at the portal host's root; "/partner/launch" is the old address, which still forwards.
+  if (!portalOrigins.has(url.origin) || (url.pathname !== "/launch" && url.pathname !== "/partner/launch")) return null;
   if (!/^#token=[A-Za-z0-9_-]{16,512}$/.test(url.hash)) return null;
   return url.toString();
 }

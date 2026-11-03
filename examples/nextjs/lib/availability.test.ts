@@ -9,7 +9,7 @@ const C = "33333333-3333-4333-8333-333333333333";
 function dj(id: string, available: boolean | null): PublicDj {
   return {
     id, name: `DJ ${id.slice(0, 1)}`, city: "Atlanta, GA", tier: "verified", image_url: null, available,
-    published_rate_cents: null, draw: null, profile_url: "https://gelatin.example/djs/x",
+    published_rate_cents: null, draw: null, profile_url: "https://gelatin.example/djs/x", profile_page_url: "https://gelatin.example/djs/x",
   } as PublicDj;
 }
 

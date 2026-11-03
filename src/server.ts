@@ -139,6 +139,8 @@ function publicDj(item: unknown): PublicDj {
     city: string(row.city),
     tier: literal(row.tier, TIERS) as PublicDj["tier"],
     profile_url: string(row.profile_url),
+    // Additive: a server that predates it sends only profile_url.
+    profile_page_url: row.profile_page_url === undefined ? string(row.profile_url) : string(row.profile_page_url),
     image_url: optionalString(row.image_url),
     // avg is newer than min/max/window, so an API that doesn't send it still parses.
     draw: draw ? { min: integer(draw.min), max: integer(draw.max), avg: draw.avg === undefined ? null : integer(draw.avg), window: string(draw.window) } : null,
@@ -325,7 +327,8 @@ function cancellationResult(value: unknown): CancellationResult {
 
 function launchResult(value: unknown): PortalLaunchResult {
   const body = object(value);
-  return { url: string(body.url), expires_at: string(body.expires_at) };
+  // Additive: a server that predates launch_url sends only url.
+  return { launch_url: body.launch_url === undefined ? string(body.url) : string(body.launch_url), url: string(body.url), expires_at: string(body.expires_at) };
 }
 
 function paymentSessionResult(value: unknown): PaymentSessionResult {
@@ -389,6 +392,8 @@ function eventLineup(value: unknown): EventLineup {
         name: string(row.name),
         status: literal(row.status, LINEUP_STATUSES),
         profile_url: string(row.profile_url),
+        // Additive: a server that predates it sends only profile_url.
+        profile_page_url: row.profile_page_url === undefined ? string(row.profile_url) : string(row.profile_page_url),
         image_url: optionalString(row.image_url),
         // Additive fields: a server that predates them sends none.
         set_starts_at: row.set_starts_at === undefined ? null : optionalString(row.set_starts_at),

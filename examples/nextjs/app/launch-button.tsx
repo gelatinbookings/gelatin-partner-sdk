@@ -24,7 +24,7 @@ export default function LaunchButton({ eventId, requestId, djName, label = "Revi
         setMessage(`${body.error ?? "Could not open Gelatin."}${body.request_id ? ` Request ${body.request_id}.` : ""}`);
         return;
       }
-      // The server only returns Gelatin's /partner/launch URL on an approved portal origin.
+      // The server only returns Gelatin's /launch URL on an approved portal origin.
       window.location.assign(body.url);
     } catch {
       setState("error");

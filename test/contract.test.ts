@@ -195,7 +195,9 @@ describe("public partner contract", () => {
     expect(Object.keys(lineup.responses)).toEqual(expect.arrayContaining(["304", "400", "401", "403", "404", "429", "503"]));
     const schemas = (spec.components as { schemas: Record<string, { required?: string[]; properties?: Record<string, { enum?: string[] }>; additionalProperties?: boolean }> }).schemas;
     expect(schemas.EventLineup.required).toEqual(["external_event_id", "entries"]);
-    expect(Object.keys(schemas.LineupEntry.properties ?? {}).sort()).toEqual(["dj_id", "image_url", "name", "profile_url", "set_ends_at", "set_starts_at", "sound", "status"]);
+    // profile_page_url sits beside the deprecated profile_url.
+    expect(Object.keys(schemas.LineupEntry.properties ?? {}).sort()).toEqual(["dj_id", "image_url", "name", "profile_page_url", "profile_url", "set_ends_at", "set_starts_at", "sound", "status"]);
+    expect((schemas.LineupEntry.properties?.profile_url as { deprecated?: boolean }).deprecated).toBe(true);
     // Additive: a partner reading the older shape keeps working.
     expect(schemas.LineupEntry.required).toEqual(["dj_id", "name", "status", "profile_url", "image_url"]);
     expect(schemas.LineupEntry.properties?.status.enum).toEqual(["confirmed", "pending"]);

@@ -103,7 +103,14 @@ export interface PublicDj {
   tier: DjTier;
   /**
    * The DJ's public profile: the read-only, co-branded page on your portal
-   * origin when Gelatin has one registered for you, otherwise the Gelatin profile.
+   * origin when Gelatin has one registered for you (`https://<portal>/djs/{slug}`),
+   * otherwise the Gelatin profile. Link to this one.
+   */
+  profile_page_url: string;
+  /**
+   * @deprecated Use `profile_page_url`. The same page in its older
+   * `https://<portal>/partner/djs/{slug}` form, which redirects there. Kept so
+   * existing integrations keep working; no removal date yet.
    */
   profile_url: string;
   /** An https image URL, or null when the DJ has no photo. */
@@ -418,6 +425,13 @@ export interface PortalLaunchRequest {
 
 /** A one-use link to Gelatin's booking page. Redirect to it straight away: it expires in about 60 seconds. */
 export interface PortalLaunchResult {
+  /** `https://<portal>/launch#token=…`. Redirect the organizer to this one. */
+  launch_url: string;
+  /**
+   * @deprecated Use `launch_url`. The same one-use link in its older
+   * `https://<portal>/partner/launch#token=…` form, which redirects to
+   * `/launch` keeping the token. No removal date yet.
+   */
   url: string;
   expires_at: string;
 }
@@ -545,8 +559,13 @@ export interface LineupEntry {
   status: LineupStatus;
   /**
    * The DJ's public profile: the co-branded page on your portal origin when
-   * Gelatin has one registered for you, otherwise the Gelatin profile. Link to
-   * it wherever the name is shown.
+   * Gelatin has one registered for you (`https://<portal>/djs/{slug}`),
+   * otherwise the Gelatin profile. Link to it wherever the name is shown.
+   */
+  profile_page_url: string;
+  /**
+   * @deprecated Use `profile_page_url`. The same page in its older
+   * `/partner/djs/{slug}` form, which redirects there. No removal date yet.
    */
   profile_url: string;
   /** An https image URL, or null when the DJ has no photo. */

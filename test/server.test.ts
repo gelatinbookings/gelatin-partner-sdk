@@ -266,7 +266,8 @@ describe("partner server client", () => {
 
     expect(result).toEqual({
       modified: true, etag: '"lineup-2"',
-      data: { external_event_id: "event_123", entries: [{ dj_id: "dj_456", name: "Synthetic DJ", status: "confirmed", profile_url: "https://gelatin.example/djs/synthetic-dj", image_url: null, set_starts_at: null, set_ends_at: null, sound: null }] },
+      // A server from before profile_page_url sends none; the client fills it from profile_url.
+      data: { external_event_id: "event_123", entries: [{ dj_id: "dj_456", name: "Synthetic DJ", status: "confirmed", profile_url: "https://gelatin.example/djs/synthetic-dj", profile_page_url: "https://gelatin.example/djs/synthetic-dj", image_url: null, set_starts_at: null, set_ends_at: null, sound: null }] },
     });
   });
 
@@ -533,11 +534,27 @@ describe("partner server client", () => {
 
     const result = await client.createPortalLaunch(input, { idempotencyKey: "launch-2" });
 
-    expect(result).toEqual({ url: "https://book.acme.example/partner/launch#token=opaque", expires_at: "2026-10-12T18:00:00Z" });
+    // A server from before launch_url sends only url; the client fills launch_url from it.
+    expect(result).toEqual({ launch_url: "https://book.acme.example/partner/launch#token=opaque", url: "https://book.acme.example/partner/launch#token=opaque", expires_at: "2026-10-12T18:00:00Z" });
     const [url, init] = (fetcher as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
     expect(new URL(url).pathname).toBe("/v1/partners/acme/portal-launches");
     expect(new Headers(init.headers).get("Idempotency-Key")).toBe("launch-2");
     expect(JSON.parse(String(init.body))).toEqual(input);
+  });
+
+  it("returns both launch forms from a current server", async () => {
+    const launch = mockFetch(Response.json({
+      launch_url: "https://book.acme.example/launch#token=opaque",
+      url: "https://book.acme.example/partner/launch#token=opaque",
+      expires_at: "2026-10-12T18:00:00Z",
+    }, { status: 201 }));
+    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: launch });
+    const input = { external_event_id: "event_123", external_user_id: "user_789", resource: { kind: "request" as const, id: "33333333-3333-4333-8333-333333333333" }, return_url: "https://acme.example/events/event_123" };
+    expect(await client.createPortalLaunch(input, { idempotencyKey: "launch-3" })).toEqual({
+      launch_url: "https://book.acme.example/launch#token=opaque",
+      url: "https://book.acme.example/partner/launch#token=opaque",
+      expires_at: "2026-10-12T18:00:00Z",
+    });
   });
 
   it("previews and cancels a booking by its booking_id, with a stable default key for the cancellation", async () => {

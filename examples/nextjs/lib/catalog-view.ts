@@ -56,7 +56,8 @@ export function toCatalogDj(dj: PublicDj): CatalogDj {
     available: dj.available,
     rateDollars: dj.published_rate_cents === null ? null : Math.round(dj.published_rate_cents / 100),
     drawLabel: drawLabel(dj.draw),
-    profileUrl: dj.profile_url.startsWith("https://") ? dj.profile_url : null,
+    // profile_page_url is the root-form link; profile_url is its deprecated /partner form.
+    profileUrl: dj.profile_page_url.startsWith("https://") ? dj.profile_page_url : null,
     genres: (dj.genres ?? []).slice(0, 6),
   };
 }

@@ -174,7 +174,7 @@ export function createBookingPost(deps: HandlerDeps) {
         resource: { kind: "request", id: booking.engagements[0].requestId },
         return_url: returnUrl.toString(),
       }).catch(() => null);
-      const url = launch ? approvedLaunchUrl(launch.url, config.portalOrigins) : null;
+      const url = launch ? approvedLaunchUrl(launch.launch_url, config.portalOrigins) : null;
       return json({ next: url ?? bookingsPage }, 201, saved);
     } catch (error) {
       const described = describeGelatinError(error);
@@ -297,7 +297,7 @@ export function createLaunchPost(deps: HandlerDeps) {
         return_url: returnUrl.toString(),
       });
       // Only ever redirect to your own Gelatin booking page.
-      const url = approvedLaunchUrl(launch.url, config.portalOrigins);
+      const url = approvedLaunchUrl(launch.launch_url, config.portalOrigins);
       if (!url) {
         console.error("Refused a Gelatin launch URL outside GELATIN_PORTAL_ORIGINS");
         return json({ error: "Gelatin returned an unexpected address. Check GELATIN_PORTAL_ORIGINS." }, 502);
