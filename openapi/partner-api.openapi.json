@@ -63,7 +63,33 @@
               "type": "string",
               "format": "date"
             },
-            "description": "Calendar date for advisory availability. When omitted, available is false."
+            "description": "Calendar date for advisory availability. When omitted with no set window, available is false. Cannot be combined with a set window."
+          },
+          {
+            "name": "set_starts_at",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "The start of the organizer's chosen set time, with an offset and URL-encoded. Send it with set_ends_at and time_zone, and available is advisory for that window instead of a whole date."
+          },
+          {
+            "name": "set_ends_at",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "The end of the set window, after set_starts_at."
+          },
+          {
+            "name": "time_zone",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The event's IANA time zone, for the set window's calendar dates."
           },
           {
             "name": "available",
@@ -962,7 +988,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "description": "Requires bookings:read. Mounted. Who is playing at one of your events, safe to show on a public event page: each DJ's id, name, public profile link and photo, and nothing about price, offers or the organizer. Resolves the event only through the authenticated partner's own external_event_id; an unknown event and another partner's event both return the same 404. By default it lists only DJs whose booking is confirmed (Gelatin recorded the signed capture). include=pending also lists DJs who have the offer and haven't settled it (requested, negotiating or reauthorization_required in getEventBookings) with status pending; a request still waiting for the organizer's first card hold is never listed, because the DJ hasn't seen it. Declined, expired and cancelled bookings are simply absent. A DJ appears once per event, and a DJ removed from your catalog distribution is left out. Link the name to profile_url wherever it is shown. ETag and If-None-Match return 304 with no body. Responses use Cache-Control: private, no-store."
+        "description": "Requires bookings:read. Mounted. Who is playing at one of your events, safe to show on a public event page: each DJ's id, name, public profile link and photo, plus a confirmed DJ's set time and sound when known, and nothing about price, offers or the organizer. Resolves the event only through the authenticated partner's own external_event_id; an unknown event and another partner's event both return the same 404. By default it lists only DJs whose booking is confirmed (Gelatin recorded the signed capture). include=pending also lists DJs who have the offer and haven't settled it (requested, negotiating or reauthorization_required in getEventBookings) with status pending; a request still waiting for the organizer's first card hold is never listed, because the DJ hasn't seen it. Declined, expired and cancelled bookings are simply absent. Pending entries carry no set time or sound. Entries with a set time come first, in time order. A DJ appears once per event, and a DJ removed from your catalog distribution is left out. Link the name to profile_url wherever it is shown. ETag and If-None-Match return 304 with no body. Responses use Cache-Control: private, no-store."
       }
     },
     "/v1/partners/{partner}/events/{external_event_id}": {
@@ -1146,7 +1172,7 @@
     "/v1/partners/{partner}/booking-requests": {
       "post": {
         "summary": "Submit one partner booking with one or more DJ requests (mounted)",
-        "description": "Requires `requests:write`. Body at most 64 KiB. `authorization_placement` is `partner_event_flow` when your page takes the first card hold with `POST /payment-sessions`, or `gelatin_portal_handoff` when the organizer pays in Gelatin through a portal launch. Both stay able to use the portal, which is where a DJ's counteroffer is reviewed. `return_url` must use an origin Gelatin registered for the partner. Only `external_event_id` and `organizer.external_user_id` identify the booking; `external_booking_id` and each `external_request_id` are optional, and `external_submission_id` is deprecated and ignored. This part of the contract is still proposed.",
+        "description": "Requires `requests:write`. Body at most 64 KiB. `authorization_placement` is `partner_event_flow` when your page takes the first card hold with `POST /payment-sessions`, or `gelatin_portal_handoff` when the organizer pays in Gelatin through a portal launch. Both stay able to use the portal, which is where a DJ's counteroffer is reviewed. `return_url` must use an origin Gelatin registered for the partner. Only `external_event_id` and `organizer.external_user_id` identify the booking; `external_booking_id` and each `external_request_id` are optional, and `external_submission_id` is deprecated and ignored. This part of the contract is still proposed. With `payment: \"event_checkout\"`, the key also needs `launch:write`, and the result carries `event_checkout` (as `POST /payment-sessions` with `resource: { kind: \"event\" }` returns it) or, when the booking was made but the checkout could not open, `event_checkout_error`.",
         "operationId": "submitBookingRequests",
         "security": [
           {
@@ -1231,7 +1257,7 @@
             }
           },
           "409": {
-            "description": "Permanent; do not retry unchanged. `dj_unavailable` (with `external_request_id` and `dj_id`): that request's DJ is unknown, inactive, already booked, blacked out, excluded from your catalog or not yet payable. Nothing was created and the whole submission rolled back; offer another DJ or change the schedule, then submit with a new idempotency key. `conflict`: the idempotency key was reused with a different body, the `external_booking_id` was already submitted with different terms or belongs to another event or organizer, an `external_request_id` already belongs to another booking or DJ, or the `external_event_id` belongs to another organizer.",
+            "description": "Permanent; do not retry unchanged. `dj_unavailable` (with `external_request_id` and `dj_id`): that request's DJ is unknown, inactive, already booked, blacked out, excluded from your catalog or not yet payable. Nothing was created and the whole submission rolled back; offer another DJ or change the schedule, then submit with a new idempotency key. `conflict`: the idempotency key was reused with a different body, the `external_booking_id` was already submitted with different terms or belongs to another event or organizer, an `external_request_id` already belongs to another booking or DJ, or the `external_event_id` belongs to another organizer. `event_checkout_unavailable`: `payment: \"event_checkout\"` was sent but saved cards aren't on for your partner; nothing was created, so send it again without `payment`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1386,8 +1412,8 @@
     },
     "/v1/partners/{partner}/payment-sessions": {
       "post": {
-        "summary": "Start or resume the card hold for an organizer's initial offer on your page (mounted)",
-        "description": "Requires `launch:write`. The request must belong to the same partner, external event and external organizer, and its current offer must be the one the organizer submitted; a DJ's counteroffer returns 409 `portal_required` and is reviewed in Gelatin through a portal launch. Returns an embedded Stripe Checkout for the organizer's browser to mount with Stripe.js (`createEmbeddedCheckoutPage`) using `publishable_key`. The client secret opens only this checkout; send it to that organizer's browser only and never log it. Card details go to Stripe directly. Completing the checkout does not by itself place the hold: read booking status, which changes once Stripe confirms the hold to Gelatin. One open hold exists per offer: any key, and the Gelatin portal, resume the same checkout.",
+        "summary": "Start or resume the card hold for an organizer's initial offer, or one checkout for every DJ on their event, on your page (mounted)",
+        "description": "Requires `launch:write`. The request must belong to the same partner, external event and external organizer, and its current offer must be the one the organizer submitted; a DJ's counteroffer returns 409 `portal_required` and is reviewed in Gelatin through a portal launch. Returns an embedded Stripe Checkout for the organizer's browser to mount with Stripe.js (`createEmbeddedCheckoutPage`) using `publishable_key`. The client secret opens only this checkout; send it to that organizer's browser only and never log it. Card details go to Stripe directly. Completing the checkout does not by itself place the hold: read booking status, which changes once Stripe confirms the hold to Gelatin. One open hold exists per offer: any key, and the Gelatin portal, resume the same checkout. With `resource: { kind: \"event\" }` it instead opens one setup checkout that saves a card for this event; the consent shows inside it, above its button. Once Stripe confirms the card to Gelatin, Gelatin places one hold per DJ on the event in the background, each within the organizer's hold limits and each with a receipt email. A DJ added to the event later is held on the same card automatically. A DJ whose hold the card refuses, wants 3D Secure for, or that is over a limit stays `authorization_required`: create a portal launch for them. Every event gets its own checkout and its own card; one event's card never holds another event's DJs. Only for partners with saved cards on. Any key resumes the same open checkout; once the event's card is saved, no second checkout opens.",
         "operationId": "createPaymentSession",
         "security": [
           {
@@ -1455,7 +1481,7 @@
             "$ref": "#/components/responses/Error"
           },
           "404": {
-            "description": "`resource_unavailable`: no request with that id belongs to this partner, event and organizer.",
+            "description": "`resource_unavailable`: no request with that id, or no event for that organizer, belongs to this partner.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1465,7 +1491,7 @@
             }
           },
           "409": {
-            "description": "`portal_required`: the current offer is a DJ's counteroffer, or its hold was started on a Stripe-hosted page; create a portal launch. `offer_changed`: the offer changed, was already authorized or has expired; read booking status. `dj_unavailable`: the DJ can no longer take this booking.",
+            "description": "`portal_required`: the current offer is a DJ's counteroffer, or its hold was started on a Stripe-hosted page; create a portal launch. `offer_changed`: the offer changed, was already authorized or has expired; read booking status. `dj_unavailable`: the DJ can no longer take this booking. For `event`: `event_checkout_unavailable`, saved cards aren't on for your partner, or this event's card already refused a DJ who still needs payment, so create a payment session (or a portal launch) for each DJ still `authorization_required`; `nothing_to_pay`, every DJ on the event is held, or being held, on its card.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2297,6 +2323,16 @@
           "initial_offer": {
             "$ref": "#/components/schemas/InitialOffer"
           },
+          "set_starts_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The time the organizer chose for this DJ's set, with an offset, inside the event. Send both set fields or neither. Gelatin checks the DJ against this window instead of the whole event."
+          },
+          "set_ends_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The end of the set, after set_starts_at and no later than the event's ends_at."
+          },
           "deal": {
             "$ref": "#/components/schemas/PartnerDeal"
           }
@@ -2352,6 +2388,13 @@
             "type": "string",
             "minLength": 1,
             "description": "Optional. Your booking ID: accepted once, so the same booking under any key returns the original result, and different terms are a `409 conflict`. Left out, the `Idempotency-Key` does that job: a retry under the same key returns the original result, and a later send under a new key adds DJs to the same event as its own booking. Gelatin derives the stored value (`gelatin:…`) from the event, the organizer and the key."
+          },
+          "payment": {
+            "type": "string",
+            "enum": [
+              "event_checkout"
+            ],
+            "description": "Optional: also open one checkout for every DJ on the event and return it as `event_checkout`, so your page can mount Stripe from this one call. Needs `launch:write` as well as `requests:write`, and saved cards on for your partner."
           }
         }
       },
@@ -2892,6 +2935,37 @@
             "items": {
               "$ref": "#/components/schemas/BookingRequestEngagement"
             }
+          },
+          "event_checkout": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaymentSessionResult"
+              }
+            ],
+            "description": "Sent only with `payment: \"event_checkout\"` when the checkout opened. A replay returns the same open checkout."
+          },
+          "event_checkout_error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message"
+            ],
+            "description": "Sent only with `payment: \"event_checkout\"` when the booking was made but its checkout could not open. Fall back: `nothing_to_pay` → every DJ is held or being held on this event's card, read booking status; `event_checkout_unavailable` → pay per DJ; `temporarily_unavailable` → retry `POST /payment-sessions` with `resource: { kind: \"event\" }`.",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "nothing_to_pay",
+                  "event_checkout_unavailable",
+                  "resource_unavailable",
+                  "temporarily_unavailable"
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            }
           }
         }
       },
@@ -2915,25 +2989,45 @@
             "maxLength": 200
           },
           "resource": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "kind",
-              "id"
-            ],
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "request"
-                ]
+            "description": "`request` starts one DJ's hold. `event` opens one checkout that saves the organizer's card for every DJ on the event; it needs saved cards on for your partner.",
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "id"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "request"
+                    ]
+                  },
+                  "id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "The `request_id` from the submission result"
+                  }
+                }
               },
-              "id": {
-                "type": "string",
-                "format": "uuid",
-                "description": "The `request_id` from the submission result"
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "event"
+                    ]
+                  }
+                }
               }
-            }
+            ]
           }
         }
       },
@@ -2949,7 +3043,7 @@
         "properties": {
           "client_secret": {
             "type": "string",
-            "description": "Embedded Stripe Checkout client secret for this one hold"
+            "description": "Embedded Stripe Checkout client secret: for `request`, this one hold; for `event`, the setup checkout that saves the organizer's card"
           },
           "publishable_key": {
             "type": "string",
@@ -2958,13 +3052,18 @@
           "total_cents": {
             "type": "integer",
             "minimum": 0,
-            "description": "What the organizer authorizes: DJ fee plus Gelatin's service fee and card processing"
+            "description": "What the organizer authorizes: DJ fee plus Gelatin's service fee and card processing. For `event`, the sum over every DJ the saved card will hold"
           },
           "currency": {
             "type": "string",
             "enum": [
               "usd"
             ]
+          },
+          "dj_count": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Sent only for `event`: how many DJs the saved card will hold once it is saved"
           }
         }
       },
@@ -3026,6 +3125,42 @@
                 "type": "null"
               }
             ]
+          },
+          "set_starts_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the DJ's set starts, as a UTC instant. Null when no set time was chosen, and always null on a pending entry. Format it in your event's time zone."
+          },
+          "set_ends_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the DJ's set ends, as a UTC instant. Null under the same conditions as set_starts_at."
+          },
+          "sound": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 80
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The sound the DJ is bringing to this set, in their own words, as plain text. Null when they haven't named one, and always null on a pending entry."
           }
         }
       },

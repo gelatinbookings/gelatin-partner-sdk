@@ -97,7 +97,8 @@ export default function PayButton({ eventId, requestId, djName }: { eventId: str
 
 let teardown: Promise<void> = Promise.resolve();
 
-function EmbeddedCheckout({ session, onComplete }: { session: Session; onComplete: () => void }) {
+/** Stripe's embedded checkout for one Gelatin client secret; also mounts the one checkout for every DJ. */
+export function EmbeddedCheckout({ session, onComplete }: { session: Session; onComplete: () => void }) {
   const mount = useRef<HTMLDivElement>(null);
   const done = useRef(onComplete);
   const [failed, setFailed] = useState(false);

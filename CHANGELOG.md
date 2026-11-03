@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.1.0-alpha.8
+
+Additive: every call and field from alpha.7 works as before, and no response field was removed or changed type. A server older than this release refuses the new `payment` field with `400 invalid_request` and creates nothing.
+
+### New
+
+- **One checkout for every DJ, on your page (verify on staging).** Gelatin is still checking this end to end in its sandbox, so test it there before you rely on it. It works only when Gelatin has saved cards on for your partner.
+  - `submitBookingRequests({ ..., payment: "event_checkout" })` books and returns `event_checkout`: one Stripe checkout for every DJ on the event (`client_secret`, `publishable_key`, `total_cents`, `currency`, `dj_count`). Mount it like a per-DJ checkout. It needs `launch:write` as well as `requests:write`, and a replay returns the same booking and the same open checkout.
+  - `createEventPaymentSession({ external_event_id, external_user_id })` opens the same checkout for a booking you already sent.
+  - It is a setup checkout: it saves a card for this event, with Gelatin's consent shown inside it, and charges nothing. Gelatin then holds each DJ in the background, each with a receipt email and within the organizer's hold limits. A DJ whose hold the card refused, wanted 3-D Secure for, or was over a limit stays `authorization_required`: create a payment session or a portal launch for them.
+  - **A saved card belongs to one event.** Every event gets its own checkout and its own card, even for an organizer who has paid before; one event's card never holds another event's DJs. A DJ added later to an event whose card is saved is held on that card automatically.
+  - If it can't open: `409 event_checkout_unavailable` (saved cards aren't on for you; nothing was created), or, with the booking made, `event_checkout_error` with `nothing_to_pay` (every DJ is held or being held on the event's card), `event_checkout_unavailable` (the event's card already refused a DJ who still needs payment: pay that DJ per DJ or through a portal launch) or `temporarily_unavailable`. `createEventPaymentSession` answers the same codes as `409` errors.
+  - New types: `EventPaymentSessionRequest`, `EventPaymentSessionResult`, `EventCheckoutError`, and `BookingRequest.payment`.
+- **Set times.** `listDjs({ set: { starts_at, ends_at, time_zone } })` answers `available` for the set's window instead of the whole night. Send the same `set_starts_at` and `set_ends_at` on a DJ's request.
+- **Lineup detail.** `getEventLineup` entries carry `set_starts_at`, `set_ends_at` and the DJ's `sound` once the DJ is confirmed; they are `null` otherwise, and when talking to an older server.
+- **Saved-card receipts and limits.** These are now live. Every saved-card hold emails the organizer a receipt, and Gelatin limits each organizer's new saved-card holds.
+- The OpenAPI spec covers all of the above.
+
+### Example
+
+`examples/nextjs` in Full mode has one **Send offers & pay** button. It books and opens one checkout for every DJ on the offer step, then shows each DJ's status. Without saved cards, or against a Gelatin that doesn't offer it yet, it sends the booking again without `payment` and pays per DJ.
+
 ## 0.1.0-alpha.7
 
 Additive for existing callers: every field you send today is still accepted, with the same retry and conflict answers. The submission contract is still *proposed*.

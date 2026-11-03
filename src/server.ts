@@ -26,6 +26,9 @@ import type {
   PartnerDeal,
   PortalLaunchRequest,
   PortalLaunchResult,
+  EventCheckoutError,
+  EventPaymentSessionRequest,
+  EventPaymentSessionResult,
   PaymentSessionRequest,
   PaymentSessionResult,
   PartnerBookingStatus,
@@ -255,7 +258,15 @@ function bookingRequestResult(value: unknown): BookingRequestResult {
         ...dealOf(row.deal),
       };
     }),
+    ...(body.event_checkout === undefined ? {} : { event_checkout: eventPaymentSessionResult(body.event_checkout) }),
+    ...(body.event_checkout_error === undefined ? {} : { event_checkout_error: eventCheckoutError(body.event_checkout_error) }),
   };
+}
+
+const EVENT_CHECKOUT_ERRORS = new Set(["nothing_to_pay", "event_checkout_unavailable", "resource_unavailable", "temporarily_unavailable"] as const);
+function eventCheckoutError(value: unknown): EventCheckoutError {
+  const body = object(value);
+  return { code: literal(body.code, EVENT_CHECKOUT_ERRORS), message: string(body.message) };
 }
 
 /** Absent from servers older than Make a Deal; an unknown value is a bad response. */
@@ -327,6 +338,13 @@ function paymentSessionResult(value: unknown): PaymentSessionResult {
   };
 }
 
+function eventPaymentSessionResult(value: unknown): EventPaymentSessionResult {
+  const body = object(value);
+  const djCount = integer(body.dj_count);
+  if (djCount < 1) return invalidResponse();
+  return { ...paymentSessionResult(body), dj_count: djCount };
+}
+
 function eventBookings(value: unknown): EventBookings {
   const body = object(value);
   return {
@@ -372,6 +390,10 @@ function eventLineup(value: unknown): EventLineup {
         status: literal(row.status, LINEUP_STATUSES),
         profile_url: string(row.profile_url),
         image_url: optionalString(row.image_url),
+        // Additive fields: a server that predates them sends none.
+        set_starts_at: row.set_starts_at === undefined ? null : optionalString(row.set_starts_at),
+        set_ends_at: row.set_ends_at === undefined ? null : optionalString(row.set_ends_at),
+        sound: row.sound === undefined ? null : optionalString(row.sound),
       };
     }),
   };
@@ -588,6 +610,11 @@ export function createPartnerClient(options: PartnerClientOptions) {
       if (query.city) params.set("city", query.city);
       if (query.genre) params.set("genre", query.genre);
       if (query.date) params.set("date", query.date);
+      if (query.set) {
+        params.set("set_starts_at", query.set.starts_at);
+        params.set("set_ends_at", query.set.ends_at);
+        params.set("time_zone", query.set.time_zone);
+      }
       if (query.available) params.set("available", "true");
       // Gelatin checks the band keys and answers 400 invalid_query for an unknown one.
       if (query.budget?.length) params.set("budget", [...new Set(query.budget)].join(","));
@@ -661,6 +688,21 @@ export function createPartnerClient(options: PartnerClientOptions) {
     async createPaymentSession(input: PaymentSessionRequest, options: DefaultedWriteOptions = {}): Promise<PaymentSessionResult> {
       const idempotencyKey = options.idempotencyKey ?? randomKey();
       return json(await request("payment-sessions", "POST", input, { ...options, idempotencyKey }), paymentSessionResult);
+    },
+    /**
+     * Mounted route. One checkout for every DJ on the organizer's event: it
+     * saves a card for this event, and Gelatin then holds each DJ in the
+     * background, and any DJ added to the event later. Every event gets its
+     * own checkout. Mount it like `createPaymentSession`'s. Needs saved cards
+     * on for you; otherwise `409 event_checkout_unavailable`, so create a
+     * payment session for each DJ. Once the event's card is saved it answers
+     * `409 nothing_to_pay`. Any key resumes the same open checkout. To book
+     * and pay in one call, send `payment: "event_checkout"` with
+     * `submitBookingRequests` instead.
+     */
+    async createEventPaymentSession(input: EventPaymentSessionRequest, options: DefaultedWriteOptions = {}): Promise<EventPaymentSessionResult> {
+      const idempotencyKey = options.idempotencyKey ?? randomKey();
+      return json(await request("payment-sessions", "POST", { ...input, resource: { kind: "event" } }, { ...options, idempotencyKey }), eventPaymentSessionResult);
     },
     /** Proposed alpha route; not mounted. Use `submitBookingRequests`. */
     async submitDjRequests(input: BookingRequest, options: WriteOptions): Promise<SubmissionResult> {

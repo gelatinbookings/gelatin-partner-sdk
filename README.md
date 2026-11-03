@@ -124,7 +124,7 @@ Gelatin always takes the payment. The organizer places a card hold for each DJ, 
 | Submit with | `authorization_placement: "gelatin_portal_handoff"` | `authorization_placement: "partner_event_flow"` |
 | Payment call | `createPortalLaunch`, then redirect | `createPaymentSession` on your server, plus Stripe.js in the browser |
 | Does the organizer leave your site? | Yes, to Gelatin's co-branded page, then back to your `return_url` | No. A DJ's counteroffer still goes to Gelatin |
-| Several DJs | One visit: from the launched DJ, "All DJs for this event" reaches the rest | One checkout per DJ |
+| Several DJs | One visit: from the launched DJ, "All DJs for this event" reaches the rest | One checkout per DJ, or [one for every DJ](#on-your-own-page-full) when saved cards are on for you |
 | Your work | One server call and a redirect | A server route, a browser component, and status reads |
 | Pick it when | You want the quickest integration | You want the organizer to stay on your page |
 | Scopes | `requests:write` (submit), `launch:write` (launch), `bookings:read` (status) | The same: `createPaymentSession` also needs `launch:write` |
@@ -162,7 +162,7 @@ The Next.js example's [`app/pay-button.tsx`](examples/nextjs/app/pay-button.tsx)
 
 ### Gotchas
 
-- **One DJ per payment session, today.** `resource` is always `{ kind: "request" }`, so a booking with three DJs needs three checkouts. Stripe allows one embedded checkout on a page at a time, so call `checkout.destroy()` before mounting the next.
+- **One DJ per payment session, unless saved cards are on for you.** With `resource: { kind: "request" }`, a booking with three DJs needs three checkouts. With saved cards on, [one checkout covers every DJ](#on-your-own-page-full). Stripe allows one embedded checkout on a page at a time, so call `checkout.destroy()` before mounting the next.
 - **`409 portal_required` means "use the portal for this DJ".** You get it when the DJ countered, so the offer on the table is no longer the organizer's own. You also get it when that DJ's hold was already started on Gelatin's page. Fall back to `createPortalLaunch` for that request and redirect.
 - **A second click returns the same checkout.** Gelatin keeps one open hold per offer and returns it whichever idempotency key asks, so a double click or a retry never makes two holds.
 - **`409 offer_changed`:** the offer changed, was already paid, or expired. Read status before offering payment again.
@@ -171,28 +171,56 @@ The Next.js example's [`app/pay-button.tsx`](examples/nextjs/app/pay-button.tsx)
 
 > **Off by default, testing only.** This is a per-partner switch that Gelatin sets for you (`organizer_card_mode`: `per_hold`, the default, or `saved_card`). It isn't released for live money until the consent wording, Gelatin's Terms and your agreement to it are signed off. Until then the consent text is a draft and is labelled as one.
 
-With it on, an organizer booking several DJs enters their card once instead of once per DJ. Gelatin still holds and charges each DJ separately.
+With it on, an organizer booking several DJs enters their card once per event instead of once per DJ. Gelatin still holds and charges each DJ separately. A saved card belongs to the one event it was saved for: it only ever holds that event's DJs, and the organizer's next event gets its own checkout and its own card. Gelatin never shows or reuses one event's card on another event; Stripe's own Link or the browser may offer to fill the card in.
 
 **What the organizer sees, on the portal's event page (`/partner/event`, "All DJs for this event"):**
 
 1. A "Pay once for your DJs" panel lists the DJs whose offers are waiting for a hold, with the total, and a consent checkbox.
 2. "Save card and hold for …" opens one embedded Stripe Checkout in **setup mode**. It saves the card and charges nothing.
 3. Gelatin then places **one hold per DJ** on that card, each for that DJ's own total. Each is a manual-capture hold, charged only if that DJ accepts, exactly like a Checkout hold. A hold the bank wants confirmed (3-D Secure) is completed on the same page.
-4. Next time, the panel reads "Hold with your saved card" and holds in one click. The card is removed from Stripe once all of the organizer's bookings with you are settled.
+4. If a DJ on this event still needs a hold, the panel reads "Hold with your saved card" and holds in one click. The card is removed from Stripe once this event's bookings are all settled.
 
 **How you get the organizer there:**
 
 - **No launch opens the event page directly.** `createPortalLaunch` (`kind: "request"` or `"booking"`) opens that one DJ's page. The session covers the whole event, so "All DJs for this event" on that page reaches the panel. Gelatin's own emails to the organizer open the event page directly.
 - **Light partners need no change.** Keep launching as you do. The panel appears for organizers of a partner with the switch on.
-- **Full partners:** `createPaymentSession` is unchanged. It is still one DJ per session, in payment mode, and there is **no in-page "one checkout" for your own page yet**. To offer one checkout for several DJs, send the organizer to the portal with a launch.
+- **Full partners:** one checkout on your own page, below.
 
 **What you'll see per DJ in `getEventBookings`:** the same statuses as today, with no new values.
 
 - **While Gelatin places a hold in the background:** `authorization_required` until the hold is confirmed, then `requested`.
 - **A background hold the card refuses:** that DJ stays `authorization_required` (`reauthorization_required` after a counteroffer). Gelatin emails the organizer a "payment needed" link, and that DJ's page offers to authorize with the same card or another. If the organizer is on your site, mint a `createPortalLaunch` for that request. Other DJs' holds are unaffected.
+- **A DJ added to the event later is held automatically** on the event's saved card: a new `submitBookingRequests` for the same `external_event_id` and organizer, or an alternate the organizer picks in the portal. It is an off-session hold within the same limits, with a receipt. You don't need to do anything. A DJ added to another event is never held on this one's card.
 - **A new offer is held again automatically** on the saved card. This covers a DJ's counteroffer the organizer accepts and the organizer's own counteroffer. The new hold is placed first and the old one released after. The DJ reads `reauthorization_required` until the new hold is in place, then moves on exactly as with a Checkout hold. You don't need to do anything.
 
-**Coming:** a receipt email to the organizer for every hold, and per-organizer hold limits.
+**Receipts and limits.** Every hold on a saved card emails the organizer a receipt. Each organizer's new holds, across all their events, stay within limits Gelatin sets: per hold, per day, and new DJs per day. A hold over a limit is refused, that DJ stays `authorization_required`, and the organizer gets a "payment needed" email. Gelatin doesn't try that DJ on the card again.
+
+### On your own page (Full)
+
+> **Verify on the sandbox first.** This is new in `0.1.0-alpha.8` and is still being checked end to end in Gelatin's sandbox.
+
+With saved cards on for you, your page can take one card for every DJ on the event, and the organizer never leaves your site.
+
+Each event gets its own checkout: an organizer's second event asks for a card again.
+
+1. **Book and pay in one call.** Send `submitBookingRequests` with `payment: "event_checkout"` (and `authorization_placement: "partner_event_flow"`). The key needs `launch:write` as well as `requests:write`. The result carries `event_checkout`: `{ client_secret, publishable_key, total_cents, currency, dj_count }`, where `total_cents` covers every DJ the card will hold. Or, for a booking you already sent, call `createEventPaymentSession({ external_event_id, external_user_id })` for the same result.
+2. **Mount it** exactly like a per-DJ checkout ([Paying on your page](#paying-on-your-page)). It is a **setup** checkout: it saves the card and charges nothing. Gelatin shows the consent inside it, above its button, so you don't render any consent yourself.
+3. **Gelatin holds each DJ in the background** once Stripe confirms the card to Gelatin, usually within seconds. Each DJ gets their own hold, receipt and limits, as above. Show "Confirming…" and read `getEventBookings` until each DJ leaves `authorization_required`.
+4. **Any DJ still `authorization_required`** had a hold the card refused, needed 3-D Secure for, or was over a limit. Mint a `createPortalLaunch` for that request; the organizer finishes it in Gelatin.
+
+A replay of the same submission returns the same booking and the same open checkout, and so does a repeat `createEventPaymentSession`.
+
+**When it can't open:**
+
+| You get | Meaning | Do this |
+| --- | --- | --- |
+| `409 event_checkout_unavailable` from `submitBookingRequests` | Saved cards aren't on for you. Nothing was created. | Send it again without `payment`, and use `createPaymentSession` per DJ |
+| `event_checkout_error: { code: "nothing_to_pay" }` | Every DJ on the event is held, or being held. This includes DJs you just added to an event whose card is already saved: Gelatin holds them on that card. | Read `getEventBookings` |
+| `event_checkout_error: { code: "event_checkout_unavailable" }` in a `201` | The event's card is saved, but it already refused a DJ who still needs payment | `createPaymentSession` or `createPortalLaunch` for each DJ still `authorization_required` |
+| `event_checkout_error: { code: "temporarily_unavailable" }` | The booking was made; Stripe or Gelatin is briefly unavailable | Call `createEventPaymentSession` |
+| `403 forbidden_scope` | The key lacks `launch:write` | Add the scope, or send without `payment` |
+
+`createEventPaymentSession` answers the same codes as `409` errors. The Next.js example's offer step ([`app/offer/offer-form.tsx`](examples/nextjs/app/offer/offer-form.tsx)) books and mounts the checkout from one call, and falls back to paying per DJ when the checkout isn't available.
 
 ## Finding DJs
 
@@ -272,12 +300,14 @@ Gelatin's own booking page shows the same list. Its Offer button returns the org
 
 ### A public event page
 
-For a public event page, read the lineup rather than the status feed. It carries names, profile links and photos, and no prices:
+For a public event page, read the lineup rather than the status feed. It carries names, profile links and photos, a confirmed DJ's set time and sound when known, and no prices:
 
 ```ts
 const lineup = await gelatin.getEventLineup("event_123", { includePending: true, ifNoneMatch: lastEtag });
-if (lineup.modified) renderLineup(lineup.data.entries); // each entry: dj_id, name, status, profile_url, image_url
+if (lineup.modified) renderLineup(lineup.data.entries); // each entry: dj_id, name, status, profile_url, image_url, set_starts_at, set_ends_at, sound
 ```
+
+When the organizer chooses a DJ's set time in your flow, pass it to `listDjs({ set: { starts_at, ends_at, time_zone } })` in place of `date`, so `available` answers for that window, and send the same `set_starts_at` and `set_ends_at` on the DJ's request. The DJ names their own `sound` on their booking; the lineup returns it once they are confirmed, and nothing on a `pending` entry.
 
 ### Values that depend on your partner settings
 
@@ -418,6 +448,8 @@ Failed calls throw `PartnerApiError` with `status`, a safe `code` and the `reque
 | 409 | `conflict`, `idempotency_conflict` | An ID or key was reused with different content |
 | 409 | `portal_required` | `createPaymentSession` on a DJ's counteroffer: send the organizer to Gelatin with a portal launch |
 | 409 | `offer_changed` | The offer changed, was already paid or expired; read status |
+| 409 | `event_checkout_unavailable` | One checkout for every DJ isn't on for you, or the event's card already refused a DJ who still needs payment; pay that DJ per DJ or through a portal launch |
+| 409 | `nothing_to_pay` | `createEventPaymentSession` when every DJ on the event is held or being held; read status |
 | 429 | `rate_limited` | Retried automatically after `Retry-After` |
 | 503 | `temporarily_unavailable` | Retried automatically |
 

@@ -151,6 +151,76 @@ describe("booking submission", () => {
     expect(submitBookingRequests).not.toHaveBeenCalled();
   });
 
+  describe("one checkout for every DJ (Full)", () => {
+    const engagements = [{ id: "x", external_request_id: "r", dj_id: DJ_ID, request_id: REQUEST_ID, booking_id: "b", offer_id: "o", revision: 1, total_cents: 54_200, currency: "usd" }];
+    const checkout = { client_secret: "cs_test_e1_secret_f2", publishable_key: "pk_test_c3", total_cents: 54_200, currency: "usd", dj_count: 1 };
+
+    it("books and opens the event's one checkout in a single call, and remembers the booking pays once", async () => {
+      const submitBookingRequests = vi.fn(async () => ({ group_id: "g", event_id: "e", engagements, event_checkout: checkout }));
+      const response = await createBookingPost(deps({ submitBookingRequests }))(post("/api/bookings", form, { cookie: sessionCookie() }));
+      expect(response.status).toBe(201);
+      expect(await response.json()).toEqual({
+        next: `/bookings?event=demo-evt-${form.nonce}`,
+        checkout: { client_secret: checkout.client_secret, publishable_key: checkout.publishable_key, total_cents: 54_200, currency: "usd", dj_count: 1 },
+      });
+      expect(submitBookingRequests).toHaveBeenCalledTimes(1);
+      expect((submitBookingRequests.mock.calls[0] as unknown as [{ payment?: string }])[0].payment).toBe("event_checkout");
+      const saved = readBookings(config, readCookie(cookieValue(response.headers.get("set-cookie") ?? ""), names.bookings));
+      expect(saved[0].eventCheckout).toBe(true);
+    });
+
+    it("sends the booking again without it when Gelatin has no saved cards for this partner, and pays per DJ", async () => {
+      const submitBookingRequests = vi.fn()
+        .mockRejectedValueOnce(new PartnerApiError(409, "event_checkout_unavailable", "Partner API request failed", "req_1"))
+        .mockResolvedValueOnce({ group_id: "g", event_id: "e", engagements });
+      const response = await createBookingPost(deps({ submitBookingRequests }))(post("/api/bookings", form, { cookie: sessionCookie() }));
+      expect(response.status).toBe(201);
+      expect(await response.json()).toEqual({ next: `/bookings?event=demo-evt-${form.nonce}` });
+      expect((submitBookingRequests.mock.calls[1] as unknown as [{ payment?: string }])[0]).not.toHaveProperty("payment");
+      const saved = readBookings(config, readCookie(cookieValue(response.headers.get("set-cookie") ?? ""), names.bookings));
+      expect(saved[0].eventCheckout).toBeUndefined();
+    });
+
+    it("sends the booking again without it when the Gelatin it talks to doesn't know the option yet", async () => {
+      // An older Gelatin's strict schema answers 400 invalid_request to the unknown `payment` field.
+      const submitBookingRequests = vi.fn()
+        .mockRejectedValueOnce(new PartnerApiError(400, "invalid_request", "Partner API request failed", "req_2"))
+        .mockResolvedValueOnce({ group_id: "g", event_id: "e", engagements });
+      const response = await createBookingPost(deps({ submitBookingRequests }))(post("/api/bookings", form, { cookie: sessionCookie() }));
+      expect(response.status).toBe(201);
+      expect(await response.json()).toEqual({ next: `/bookings?event=demo-evt-${form.nonce}` });
+      expect(submitBookingRequests).toHaveBeenCalledTimes(2);
+      expect((submitBookingRequests.mock.calls[1] as unknown as [{ payment?: string }])[0]).not.toHaveProperty("payment");
+    });
+
+    it("still reports a booking Gelatin rejects without the option too", async () => {
+      const submitBookingRequests = vi.fn(async () => { throw new PartnerApiError(400, "invalid_request", "Partner API request failed", "req_3"); });
+      const response = await createBookingPost(deps({ submitBookingRequests }))(post("/api/bookings", form, { cookie: sessionCookie() }));
+      expect(response.status).toBe(400);
+      expect(submitBookingRequests).toHaveBeenCalledTimes(2);
+    });
+
+    it("keeps the booking and pays per DJ when the checkout didn't open, or isn't a test-mode embedded checkout", async () => {
+      for (const extra of [
+        { event_checkout_error: { code: "nothing_to_pay", message: "Read the booking status." } },
+        { event_checkout: { ...checkout, publishable_key: "pk_live_c3" } },
+      ]) {
+        const submitBookingRequests = vi.fn(async () => ({ group_id: "g", event_id: "e", engagements, ...extra }));
+        const response = await createBookingPost(deps({ submitBookingRequests }))(post("/api/bookings", form, { cookie: sessionCookie() }));
+        expect(response.status).toBe(201);
+        expect(await response.json()).toEqual({ next: `/bookings?event=demo-evt-${form.nonce}` });
+      }
+    });
+
+    it("never asks for it on Light", async () => {
+      const submitBookingRequests = vi.fn(async () => ({ group_id: "g", event_id: "e", engagements }));
+      const createPortalLaunch = vi.fn(async () => ({ url: `https://book-demo.staging.gelatinbookings.com/partner/launch#token=${token}`, expires_at: "2030-01-01T00:00:00Z" }));
+      const light = `${sessionCookie()}; ${names.tier}=light`;
+      await createBookingPost(deps({ submitBookingRequests, createPortalLaunch }))(post("/api/bookings", form, { cookie: light }));
+      expect((submitBookingRequests.mock.calls[0] as unknown as [{ payment?: string }])[0]).not.toHaveProperty("payment");
+    });
+  });
+
   it("maps Gelatin errors to a short message and its request ID without the raw response", async () => {
     const submitBookingRequests = vi.fn(async () => { throw new PartnerApiError(409, "conflict", "Partner API request failed", "req_123"); });
     const response = await createBookingPost(deps({ submitBookingRequests }))(post("/api/bookings", form, { cookie: sessionCookie() }));

@@ -49,12 +49,36 @@ const LABELS: Record<PartnerBookingStatus, Described> = {
   cancelled: { label: "Cancelled", tone: "no", action: null, via: null, manage: false },
 };
 
-/** What the bookings list shows for a request; an unknown status keeps the Gelatin link. */
-export function describeStatus(status: PartnerBookingStatus | undefined): Described {
+/**
+ * What the bookings list shows for a request; an unknown status keeps the
+ * Gelatin link. A booking paid with one checkout for every DJ has no per-DJ
+ * "Pay now": Gelatin places each hold in the background, so a DJ still waiting
+ * reads as confirming just after checkout, and later is finished in Gelatin
+ * (the card refused that hold, wanted 3-D Secure, or hit a limit).
+ */
+export function describeStatus(status: PartnerBookingStatus | undefined, paid?: { eventCheckout: boolean; confirming: boolean }): Described {
+  if (status === "authorization_required" && paid?.eventCheckout) {
+    return paid.confirming
+      ? { label: "Confirming card hold…", tone: "wait", action: null, via: null, manage: false }
+      : { label: "Payment needed", tone: "wait", action: "Finish payment in Gelatin", via: "gelatin", manage: false };
+  }
   return status ? LABELS[status] : { label: null, tone: "wait", action: "Review and pay in Gelatin", via: "gelatin", manage: false };
 }
 
-/** A DJ still has to answer one of these requests, so their status can change without the organizer. */
-export function shouldPoll(statuses: Record<string, PartnerBookingStatus>): boolean {
-  return Object.values(statuses).some((status) => status === "requested" || status === "negotiating");
+/** How long after one checkout for every DJ a DJ still waiting reads as "Confirming". */
+const CONFIRMING_MS = 2 * 60_000;
+
+/** Whether `since` (the `confirming` time the offer page added, in ms) is recent enough to still be confirming. */
+export function confirmingSince(since: string | undefined, now = Date.now()): boolean {
+  const elapsed = now - Number(since);
+  return Number.isFinite(elapsed) && elapsed >= 0 && elapsed < CONFIRMING_MS;
+}
+
+/**
+ * A DJ still has to answer one of these requests, so their status can change
+ * without the organizer; or, just after one checkout for every DJ, Gelatin is
+ * still placing the holds.
+ */
+export function shouldPoll(statuses: Record<string, PartnerBookingStatus>, confirming = false): boolean {
+  return Object.values(statuses).some((status) => status === "requested" || status === "negotiating" || (confirming && status === "authorization_required"));
 }
