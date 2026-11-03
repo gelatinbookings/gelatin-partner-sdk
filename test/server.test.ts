@@ -104,7 +104,7 @@ describe("partner server client", () => {
 
   it("asks for only the DJs free that night with available, and leaves it out otherwise", async () => {
     const fetcher = vi.fn(async () => Response.json({ items: [], next_cursor: null })) as unknown as typeof fetch;
-    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/memberly", apiKey: "gel_test_private", fetch: fetcher });
+    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: fetcher });
 
     await client.listDjs({ date: "2026-11-14", available: true });
     expect(new URL((vi.mocked(fetcher).mock.calls[0] as [string])[0]).searchParams.get("available")).toBe("true");
@@ -266,8 +266,32 @@ describe("partner server client", () => {
 
     expect(result).toEqual({
       modified: true, etag: '"lineup-2"',
-      data: { external_event_id: "event_123", entries: [{ dj_id: "dj_456", name: "Synthetic DJ", status: "confirmed", profile_url: "https://gelatin.example/djs/synthetic-dj", image_url: null }] },
+      data: { external_event_id: "event_123", entries: [{ dj_id: "dj_456", name: "Synthetic DJ", status: "confirmed", profile_url: "https://gelatin.example/djs/synthetic-dj", image_url: null, set_starts_at: null, set_ends_at: null, sound: null }] },
     });
+  });
+
+  it("returns a lineup entry's set time and sound", async () => {
+    const fetcher = mockFetch(Response.json({
+      external_event_id: "event_123",
+      entries: [{
+        dj_id: "dj_456", name: "Synthetic DJ", status: "confirmed", profile_url: "https://gelatin.example/djs/synthetic-dj", image_url: null,
+        set_starts_at: "2031-11-14T03:00:00.000Z", set_ends_at: "2031-11-14T04:30:00.000Z", sound: "House",
+      }],
+    }));
+    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: fetcher });
+    const result = await client.getEventLineup("event_123");
+    expect(result).toMatchObject({ data: { entries: [{ set_starts_at: "2031-11-14T03:00:00.000Z", set_ends_at: "2031-11-14T04:30:00.000Z", sound: "House" }] } });
+  });
+
+  it("sends the organizer's set window when listing DJs", async () => {
+    const fetcher = mockFetch(Response.json({ items: [], next_cursor: null }));
+    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: fetcher });
+    await client.listDjs({ set: { starts_at: "2031-11-13T22:00:00-05:00", ends_at: "2031-11-13T23:30:00-05:00", time_zone: "America/New_York" } });
+    const [[url]] = vi.mocked(fetcher).mock.calls as Array<[string, RequestInit]>;
+    const params = new URL(url).searchParams;
+    expect(params.get("set_starts_at")).toBe("2031-11-13T22:00:00-05:00");
+    expect(params.get("set_ends_at")).toBe("2031-11-13T23:30:00-05:00");
+    expect(params.get("time_zone")).toBe("America/New_York");
   });
 
   it("rejects a lineup entry with an unknown status", async () => {
@@ -283,7 +307,7 @@ describe("partner server client", () => {
       owed: [{ external_request_id: "request_001", dj_id: "dj_456", reason: "unpaid_fee", amount: { currency: "usd", total_cents: 41_000 }, due_at: "2026-11-15T04:00:00.000Z" }],
     };
     const fetcher = vi.fn<typeof fetch>(async () => Response.json(body));
-    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/memberly", apiKey: "gel_test_private", fetch: fetcher });
+    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: fetcher });
 
     expect(await client.getOrganizerStanding("club 1")).toEqual(body);
     await client.getOrganizerStanding("club 1", { externalUserId: "user_789" });
@@ -301,16 +325,16 @@ describe("partner server client", () => {
       { community_ref: "c", may_add_talent: false, amount_owed: { currency: "usd", total_cents: 1 }, owed: [owed] },
       { community_ref: "c", amount_owed: { currency: "usd", total_cents: 0 }, owed: [] },
     ]) {
-      const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/memberly", apiKey: "gel_test_private", fetch: mockFetch(Response.json(body)) });
+      const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: mockFetch(Response.json(body)) });
       await expect(client.getOrganizerStanding("c")).rejects.toMatchObject({ code: "invalid_response" });
     }
   });
 
   it("reads Make a Deal on a submission and leaves an older response unchanged", async () => {
     const engagement = { id: "e1", external_request_id: "request_001", dj_id: "dj_456", request_id: "r1", booking_id: "b1", offer_id: "o1", revision: 1, total_cents: 50_000, currency: "usd" };
-    const deal = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/memberly", apiKey: "gel_test_private", fetch: mockFetch(Response.json({ group_id: "g", event_id: "v", engagements: [{ ...engagement, deal: "make_a_deal" }] }, { status: 201 })) });
+    const deal = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: mockFetch(Response.json({ group_id: "g", event_id: "v", engagements: [{ ...engagement, deal: "make_a_deal" }] }, { status: 201 })) });
     expect((await deal.submitBookingRequests({ ...submission, organizer: { ...submission.organizer, community_ref: "club 1" }, requests: [{ ...submission.requests[0], deal: "make_a_deal" }] }, { idempotencyKey: "k1" })).engagements[0].deal).toBe("make_a_deal");
-    const older = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/memberly", apiKey: "gel_test_private", fetch: mockFetch(Response.json({ group_id: "g", event_id: "v", engagements: [engagement] }, { status: 201 })) });
+    const older = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: mockFetch(Response.json({ group_id: "g", event_id: "v", engagements: [engagement] }, { status: 201 })) });
     expect((await older.submitBookingRequests(submission, { idempotencyKey: "k2" })).engagements[0]).not.toHaveProperty("deal");
   });
 
@@ -339,14 +363,14 @@ describe("partner server client", () => {
   it("names the DJ too, for a partner that left request IDs to Gelatin", async () => {
     const djId = "22222222-2222-4222-8222-222222222222";
     const fetcher = mockFetch(Response.json({ error: { code: "dj_unavailable", message: "x", request_id: "trace_3", external_request_id: "gelatin:derived", dj_id: djId } }, { status: 409 }));
-    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/memberly", apiKey: "gel_test_private", fetch: fetcher });
+    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: fetcher });
 
     await expect(client.listDjs({ city: "Atlanta" })).rejects.toMatchObject({ code: "dj_unavailable", externalRequestId: "gelatin:derived", djId });
   });
 
   it("drops a malformed DJ reference from an error", async () => {
     const fetcher = mockFetch(Response.json({ error: { code: "dj_unavailable", message: "x", dj_id: "not-a-uuid" } }, { status: 409 }));
-    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/memberly", apiKey: "gel_test_private", fetch: fetcher });
+    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: fetcher });
 
     await expect(client.listDjs({ city: "Atlanta" })).rejects.toMatchObject({ code: "dj_unavailable", djId: null });
   });
@@ -456,6 +480,52 @@ describe("partner server client", () => {
     await expect(client.createPaymentSession({ external_event_id: "e", external_user_id: "u", resource: { kind: "request", id: "33333333-3333-4333-8333-333333333333" } })).rejects.toMatchObject({ code: "invalid_response" });
   });
 
+  it("opens one checkout for every DJ on the event on the payment-sessions route", async () => {
+    const body = { client_secret: "cs_test_e1_secret_f2", publishable_key: "pk_test_c3", total_cents: 33153, currency: "usd", dj_count: 3 };
+    const fetcher = vi.fn(async () => Response.json(body, { status: 201 })) as unknown as typeof fetch;
+    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: fetcher });
+
+    expect(await client.createEventPaymentSession({ external_event_id: "event_123", external_user_id: "user_789" })).toEqual(body);
+
+    const [[url, init]] = (fetcher as unknown as ReturnType<typeof vi.fn>).mock.calls as Array<[string, RequestInit]>;
+    expect(new URL(url).pathname).toBe("/v1/partners/acme/payment-sessions");
+    expect(JSON.parse(String(init.body))).toEqual({ external_event_id: "event_123", external_user_id: "user_789", resource: { kind: "event" } });
+    expect(new Headers(init.headers).get("Idempotency-Key")).toBeTruthy();
+  });
+
+  it("rejects an event checkout answer without its DJ count", async () => {
+    const client = createPartnerClient({
+      baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private",
+      fetch: mockFetch(Response.json({ client_secret: "cs_test_e1_secret_f2", publishable_key: "pk_test_c3", total_cents: 33153, currency: "usd" }, { status: 201 })),
+    });
+    await expect(client.createEventPaymentSession({ external_event_id: "e", external_user_id: "u" })).rejects.toMatchObject({ code: "invalid_response" });
+  });
+
+  it("books and pays in one call: the event checkout, or why it didn't open, comes back with the booking", async () => {
+    const booked = {
+      group_id: "g", event_id: "e",
+      engagements: [{ id: "x", external_request_id: "r", dj_id: "d", request_id: "q", booking_id: "b", offer_id: "o", revision: 1, total_cents: 11051, currency: "usd" }],
+    };
+    const checkout = { client_secret: "cs_test_e1_secret_f2", publishable_key: "pk_test_c3", total_cents: 11051, currency: "usd", dj_count: 1 };
+    const paying = { ...submission, payment: "event_checkout" as const };
+    const opened = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: mockFetch(Response.json({ ...booked, event_checkout: checkout }, { status: 201 })) });
+    expect((await opened.submitBookingRequests(paying, { idempotencyKey: "pay-1" })).event_checkout).toEqual(checkout);
+
+    const refused = createPartnerClient({
+      baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private",
+      fetch: mockFetch(Response.json({ ...booked, event_checkout_error: { code: "nothing_to_pay", message: "Read the booking status." } }, { status: 201 })),
+    });
+    const result = await refused.submitBookingRequests(paying, { idempotencyKey: "pay-2" });
+    expect(result.event_checkout).toBeUndefined();
+    expect(result.event_checkout_error).toEqual({ code: "nothing_to_pay", message: "Read the booking status." });
+
+    const unknown = createPartnerClient({
+      baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private",
+      fetch: mockFetch(Response.json({ ...booked, event_checkout_error: { code: "mystery", message: "?" } }, { status: 201 })),
+    });
+    await expect(unknown.submitBookingRequests(paying, { idempotencyKey: "pay-3" })).rejects.toMatchObject({ code: "invalid_response" });
+  });
+
   it("creates a portal launch on the mounted route", async () => {
     const fetcher = mockFetch(Response.json({ url: "https://book.acme.example/partner/launch#token=opaque", expires_at: "2026-10-12T18:00:00Z" }, { status: 201 }));
     const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: fetcher });
@@ -480,13 +550,13 @@ describe("partner server client", () => {
     const fetcher = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json(preview))
       .mockResolvedValueOnce(Response.json({ ...preview, status: "cancelled", already_cancelled: false }));
-    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/memberly", apiKey: "gel_test_private", fetch: fetcher });
+    const client = createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: fetcher });
 
     expect(await client.previewCancellation(bookingId)).toEqual(preview);
     expect(await client.cancelBooking(bookingId)).toEqual({ ...preview, status: "cancelled", already_cancelled: false });
     const [[previewUrl, previewInit], [cancelUrl, cancelInit]] = vi.mocked(fetcher).mock.calls as Array<[string, RequestInit]>;
-    expect(new URL(previewUrl).pathname).toBe(`/v1/partners/memberly/bookings/${bookingId}/cancel/preview`);
-    expect(new URL(cancelUrl).pathname).toBe(`/v1/partners/memberly/bookings/${bookingId}/cancel`);
+    expect(new URL(previewUrl).pathname).toBe(`/v1/partners/acme/bookings/${bookingId}/cancel/preview`);
+    expect(new URL(cancelUrl).pathname).toBe(`/v1/partners/acme/bookings/${bookingId}/cancel`);
     expect(previewInit.method).toBe("POST");
     expect(new Headers(cancelInit.headers).get("Idempotency-Key")).toBe(`cancel:${bookingId}`);
     expect(cancelInit.body).toBeUndefined();
@@ -499,7 +569,7 @@ describe("partner server client", () => {
       booking_id: bookingId, deal: "confirm_and_book", cancellable: true, blocked_reason: null, currency: "usd", charged_cents: 0,
       refund_cents: 0, dj_keeps_cents: 0, gelatin_keeps_cents: 0, hold_released: true, rule: { code: "free_before_acceptance", text: "Free." },
     };
-    const client = (body: unknown) => createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/memberly", apiKey: "gel_test_private", fetch: vi.fn<typeof fetch>(async () => Response.json(body)) });
+    const client = (body: unknown) => createPartnerClient({ baseUrl: "https://api.gelatin.example/v1/partners/acme", apiKey: "gel_test_private", fetch: vi.fn<typeof fetch>(async () => Response.json(body)) });
     await expect(client({ ...base, rule: { code: "goodwill", text: "x" } }).previewCancellation(bookingId)).rejects.toMatchObject({ code: "invalid_response" });
     await expect(client(base).cancelBooking(bookingId)).rejects.toMatchObject({ code: "invalid_response" });
   });

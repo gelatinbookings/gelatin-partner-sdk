@@ -176,6 +176,12 @@ describe("public partner contract", () => {
     expect(payment.responses["201"].content?.["application/json"].schema.$ref).toBe("#/components/schemas/PaymentSessionResult");
     const schemas = (spec.components as { schemas: Record<string, { required?: string[] }> }).schemas;
     expect(schemas.PaymentSessionResult.required).toEqual(["client_secret", "publishable_key", "total_cents", "currency"]);
+    // One checkout for every DJ: the same route and result, with the event's DJ count, and a book-and-pay flag on submission.
+    const described = spec.components as { schemas: Record<string, { properties: Record<string, { oneOf?: Array<{ properties: { kind: { enum: string[] } } }>; enum?: string[] }> }> };
+    expect(described.schemas.PaymentSessionRequest.properties.resource.oneOf?.map((option) => option.properties.kind.enum[0])).toEqual(["request", "event"]);
+    expect(Object.keys(described.schemas.PaymentSessionResult.properties)).toContain("dj_count");
+    expect(described.schemas.DjRequestSubmission.properties.payment.enum).toEqual(["event_checkout"]);
+    expect(Object.keys(described.schemas.BookingRequestResult.properties)).toEqual(expect.arrayContaining(["event_checkout", "event_checkout_error"]));
     expect(schemas.BookingRequestResult.required).toEqual(["group_id", "event_id", "engagements"]);
     expect(schemas.BookingRequestEngagement.required).toEqual(expect.arrayContaining(["request_id", "booking_id", "total_cents", "currency"]));
   });
@@ -189,8 +195,19 @@ describe("public partner contract", () => {
     expect(Object.keys(lineup.responses)).toEqual(expect.arrayContaining(["304", "400", "401", "403", "404", "429", "503"]));
     const schemas = (spec.components as { schemas: Record<string, { required?: string[]; properties?: Record<string, { enum?: string[] }>; additionalProperties?: boolean }> }).schemas;
     expect(schemas.EventLineup.required).toEqual(["external_event_id", "entries"]);
-    expect(Object.keys(schemas.LineupEntry.properties ?? {}).sort()).toEqual(["dj_id", "image_url", "name", "profile_url", "status"]);
+    expect(Object.keys(schemas.LineupEntry.properties ?? {}).sort()).toEqual(["dj_id", "image_url", "name", "profile_url", "set_ends_at", "set_starts_at", "sound", "status"]);
+    // Additive: a partner reading the older shape keeps working.
+    expect(schemas.LineupEntry.required).toEqual(["dj_id", "name", "status", "profile_url", "image_url"]);
     expect(schemas.LineupEntry.properties?.status.enum).toEqual(["confirmed", "pending"]);
+  });
+
+  it("lets the partner pass the organizer's set time to the catalog and the submission", () => {
+    const paths = spec.paths as Record<string, Record<string, { parameters: Array<{ name: string }> }>>;
+    const names = paths["/v1/partners/{partner}/djs"].get.parameters.map((parameter) => parameter.name);
+    expect(names).toEqual(expect.arrayContaining(["set_starts_at", "set_ends_at", "time_zone"]));
+    const schemas = (spec.components as { schemas: Record<string, { required?: string[]; properties?: Record<string, unknown> }> }).schemas;
+    expect(Object.keys(schemas.IndependentDjRequest.properties ?? {})).toEqual(expect.arrayContaining(["set_starts_at", "set_ends_at"]));
+    expect(schemas.IndependentDjRequest.required).toEqual(["dj_id", "initial_offer"]);
   });
 
   it("documents the permanent submission errors on the mounted route", () => {

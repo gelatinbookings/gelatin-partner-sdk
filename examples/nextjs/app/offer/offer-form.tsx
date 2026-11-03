@@ -4,13 +4,31 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { eventComplete, hasDjs, removeDjs, submissionBody, takenDjs } from "../../lib/draft";
+import { EmbeddedCheckout } from "../pay-button";
 import { longDate } from "../steps";
 import { TakenNotice } from "../taken-notice";
 import { useDraft } from "../use-draft";
 import { usePickedAvailability } from "../use-picked-availability";
 
-export default function OfferForm() {
+/** One checkout for every DJ, returned with the booking (Full, with saved cards on). */
+type EventCheckout = { session: { clientSecret: string; publishableKey: string }; next: string; totalCents: number; currency: string; djCount: number };
+
+function readCheckout(value: unknown, next: string): EventCheckout | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (typeof row.client_secret !== "string" || typeof row.publishable_key !== "string" || typeof row.total_cents !== "number"
+    || typeof row.currency !== "string" || typeof row.dj_count !== "number") return null;
+  return { session: { clientSecret: row.client_secret, publishableKey: row.publishable_key }, next, totalCents: row.total_cents, currency: row.currency, djCount: row.dj_count };
+}
+
+/**
+ * Step 3. Full sends the offers and opens one Stripe checkout for every DJ
+ * from the same call, right here: the card is saved for this event and
+ * Gelatin holds each DJ in the background. Every event gets its own checkout. Then the bookings page shows each DJ's status.
+ */
+export default function OfferForm({ full = false }: { full?: boolean }) {
   const router = useRouter();
+  const [checkout, setCheckout] = useState<EventCheckout | null>(null);
   const { draft, setDraft, clear } = useDraft();
   const [error, setError] = useState<{ message: string; requestId?: string | null } | null>(null);
   const [sending, setSending] = useState(false);
@@ -37,7 +55,7 @@ export default function OfferForm() {
       // Last look before sending: a DJ booked meanwhile is flagged here, not as an error.
       if (takenDjs(draft, await recheck(draft)).length > 0) { showTaken(); return; }
       const response = await fetch("/api/bookings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(built.body) });
-      const body = await response.json().catch(() => ({})) as { next?: string; error?: string; request_id?: string | null; code?: string; dj_ids?: unknown };
+      const body = await response.json().catch(() => ({})) as { next?: string; checkout?: unknown; error?: string; request_id?: string | null; code?: string; dj_ids?: unknown };
       if (response.status === 401) { router.push("/login"); return; }
       if (response.status === 409 && body.code === "dj_unavailable") {
         // Booked between the last check and the send: same notice, never a raw error.
@@ -55,6 +73,9 @@ export default function OfferForm() {
         setError({ message: body.error ?? "Something went wrong. Try again.", requestId: body.request_id });
         return;
       }
+      // Booked, and one checkout for every DJ came back with it: pay right here.
+      const opened = !portal ? readCheckout(body.checkout, body.next!) : null;
+      if (opened) { setCheckout(opened); return; }
       clear();
       if (portal) window.location.assign(body.next!);
       else router.push(body.next!);
@@ -73,6 +94,26 @@ export default function OfferForm() {
     if (!draft) return;
     setDraft(removeDjs(draft, [id]));
     setRefused(false);
+  }
+
+  if (checkout) {
+    const total = new Intl.NumberFormat("en-US", { style: "currency", currency: checkout.currency.toUpperCase() }).format(checkout.totalCents / 100);
+    const leave = (path: string) => { clear(); router.push(path); };
+    return (
+      <section className="panel" aria-labelledby="pay-all-title">
+        <div className="panel-head"><h2 id="pay-all-title">Pay for your DJs</h2></div>
+        <div className="panel-body stack">
+          <p className="hint">One card for {checkout.djCount === 1 ? "your DJ" : `all ${checkout.djCount} DJs`} · <strong>{total}</strong> in total. Gelatin holds each DJ separately and charges it only if that DJ accepts.</p>
+          <div className="pay-frame">
+            <span className="pay-frame-tag">Secure checkout · served by Gelatin</span>
+            <EmbeddedCheckout session={checkout.session} onComplete={() => leave(`${checkout.next}&confirming=${Date.now()}`)} />
+          </div>
+          <div className="step-actions">
+            <button className="button-secondary" type="button" onClick={() => leave(checkout.next)}>Pay later</button>
+          </div>
+        </div>
+      </section>
+    );
   }
 
   return (
@@ -117,7 +158,7 @@ export default function OfferForm() {
       <div className="step-actions">
         <Link className="button-secondary" href="/event">Back</Link>
         <button className="button" type="submit" disabled={sending || takenPicks.length > 0}>
-          {sending ? "Sending to Gelatin…" : `Send request${draft.selected.length > 1 ? "s" : ""} to Gelatin`}
+          {sending ? "Sending to Gelatin…" : full ? `Send offer${draft.selected.length > 1 ? "s" : ""} & pay` : `Send request${draft.selected.length > 1 ? "s" : ""} to Gelatin`}
         </button>
       </div>
     </form>

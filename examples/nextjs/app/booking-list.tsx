@@ -44,7 +44,7 @@ function Alternates({ eventId, alternates }: { eventId: string; alternates: DjAl
   );
 }
 
-export default function BookingList({ bookings, highlight, statuses = {}, alternates = {}, light = false }: {
+export default function BookingList({ bookings, highlight, statuses = {}, alternates = {}, light = false, confirming = null }: {
   bookings: DemoBooking[];
   highlight: string | null;
   statuses?: Record<string, PartnerBookingStatus>;
@@ -52,6 +52,8 @@ export default function BookingList({ bookings, highlight, statuses = {}, altern
   alternates?: Record<string, DjAlternates>;
   /** Light: one "Manage in Gelatin" per DJ, and no public event page. */
   light?: boolean;
+  /** The event just paid with one checkout for every DJ, while Gelatin places its holds. */
+  confirming?: string | null;
 }) {
   if (bookings.length === 0) {
     return (
@@ -83,7 +85,9 @@ export default function BookingList({ bookings, highlight, statuses = {}, altern
                 <span className="mono">Request {engagement.requestId}</span>
               </span>
               {(() => {
-                const status = describeStatus(statuses[engagement.requestId]);
+                const status = describeStatus(statuses[engagement.requestId], booking.eventCheckout
+                  ? { eventCheckout: true, confirming: booking.eventId === confirming }
+                  : undefined);
                 return (
                   <span className="stack" style={{ gap: 6, alignItems: "flex-end" }}>
                     {status.label && <span className={`tag${status.tone === "ok" ? " tag-ok" : status.tone === "no" ? " tag-no" : ""}`}>{status.label}</span>}

@@ -15,6 +15,8 @@ export type DemoBooking = {
   engagements: Array<{ requestId: string; djName: string; totalCents: number; currency: string }>;
   /** What this site told Gelatin about the event, for its own public event page. Absent on older cookies. */
   event?: DemoEventDetails;
+  /** Paid with one checkout for every DJ: a DJ still needing payment finishes in Gelatin. */
+  eventCheckout?: true;
 };
 
 export type DemoEventDetails = { startsAt: string; endsAt: string; timeZone: string; venueName: string; venueAddress?: string };
@@ -75,6 +77,7 @@ function isBooking(value: unknown): value is DemoBooking {
   return typeof row.eventId === "string" && typeof row.eventName === "string"
     && typeof row.createdAt === "string" && typeof row.organizerId === "string"
     && (row.event === undefined || isEventDetails(row.event))
+    && (row.eventCheckout === undefined || row.eventCheckout === true)
     && Array.isArray(row.engagements) && row.engagements.every((item) => {
       const engagement = item as Record<string, unknown>;
       return engagement && typeof engagement.requestId === "string" && typeof engagement.djName === "string"

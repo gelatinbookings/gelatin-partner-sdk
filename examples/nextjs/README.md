@@ -40,8 +40,8 @@ The booking takes four pages, one per step. The **Testing guide** button in the 
 
 1. **Date & DJs** (`/`). Pick the night first. The list comes from your partner catalog with availability for that night, and only free DJs can be added. That night becomes the booking date.
 2. **Event** (`/event`). The event name, venue, the venue's address, times and an organizer email you can read. Gelatin shows the address to the DJ. "Fill with sample details" puts in a made-up name, venue and address.
-3. **Offer** (`/offer`). A fee per DJ and an optional note, then **Send**. Gelatin replies with each DJ's organizer total, fees included.
-4. **Pay** (`/bookings`). One row per DJ. **Pay now** opens Stripe's checkout on this page. Use `4242 4242 4242 4242`, any future expiry and any CVC (`4000 0027 6000 3184` shows the bank's extra security check). The card is only held; no money moves yet.
+3. **Offer** (`/offer`). A fee per DJ and an optional note, then **Send offers & pay**. Gelatin replies with each DJ's organizer total, fees included. When saved cards are on for your partner, the same call also returns one Stripe checkout for every DJ, and it opens right here: the organizer enters a card for this event, with Gelatin's consent shown inside the checkout, and Gelatin holds each DJ in the background. Every booking here is a new event, so each gets its own checkout, even for an organizer who has paid before: Gelatin never reuses one event's card for another. When they aren't on (or your Gelatin doesn't offer it yet), the booking is sent again without it and step 4 pays per DJ. Verify the one checkout in the sandbox before you rely on it.
+4. **Pay** (`/bookings`). One row per DJ. After the one checkout, each DJ reads *Confirming card hold…* and then *Card held*; a DJ Gelatin couldn't hold shows *Finish payment in Gelatin*. Otherwise **Pay now** opens Stripe's checkout on this page. Use `4242 4242 4242 4242`, any future expiry and any CVC (`4000 0027 6000 3184` shows the bank's extra security check). The card is only held; no money moves yet.
 
 Then:
 
@@ -79,6 +79,7 @@ Each place the site calls Gelatin is commented "Gelatin call N of 5", in journey
 | 1 `listDjs` | [`app/page.tsx`](app/page.tsx), [`lib/free-djs.ts`](lib/free-djs.ts) | The catalog for one night with `available: true`, so only DJs free then are listed, with paging and a "No DJs free that night" note |
 | 2 `submitBookingRequests` | [`lib/submission.ts`](lib/submission.ts), [`lib/handlers.ts`](lib/handlers.ts) | Building the request from the SDK's named types (`Organizer`, `EventDetails`, `DjRequest`), sending it, and keeping the IDs Gelatin returns |
 | 3 `createPaymentSession` | [`lib/handlers.ts`](lib/handlers.ts), [`app/pay-button.tsx`](app/pay-button.tsx) | Starting the card hold on the server, and mounting Stripe's checkout in the page |
+| 2 + 3 `payment: "event_checkout"` | [`lib/handlers.ts`](lib/handlers.ts), [`app/offer/offer-form.tsx`](app/offer/offer-form.tsx) | Booking and opening one checkout for every DJ in one call, mounting it on the offer step, and falling back to paying per DJ |
 | 4 `createPortalLaunch` | [`lib/handlers.ts`](lib/handlers.ts), [`app/launch-button.tsx`](app/launch-button.tsx) | The one-use link to your Gelatin booking page, for counteroffers and "Manage in Gelatin" |
 | 5 `getEventBookings` | [`lib/status.ts`](lib/status.ts), [`app/status-poller.tsx`](app/status-poller.tsx) | Reading each DJ's status by your event ID, and refreshing while a DJ still has to answer |
 | return | [`app/return/page.tsx`](app/return/page.tsx) | The page Gelatin sends the organizer back to |

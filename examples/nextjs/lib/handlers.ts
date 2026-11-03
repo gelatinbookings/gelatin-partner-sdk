@@ -92,6 +92,14 @@ function authorized(request: Request, config: DemoConfig) {
  * Gelatin call 2 of 5, part 2: `submitBookingRequests`. Gelatin answers with
  * one engagement per DJ. Keep `request_id` and the organizer ID with your
  * event: you need them to pay, to open Gelatin's page and to match status.
+ *
+ * Full asks for `payment: "event_checkout"` too: Gelatin then returns one
+ * Stripe checkout for every DJ with the booking, and the offer page mounts it
+ * straight away. It needs saved cards on for this partner; without them
+ * Gelatin creates nothing and answers `event_checkout_unavailable`, so the
+ * booking is sent again without it and each DJ is paid on the bookings page.
+ * The same goes for a Gelatin older than the option, which refuses the
+ * unknown field as `invalid_request`.
  */
 export function createBookingPost(deps: HandlerDeps) {
   return async (request: Request) => {
@@ -113,7 +121,21 @@ export function createBookingPost(deps: HandlerDeps) {
     }
 
     try {
-      const result = await deps.client(config).submitBookingRequests(built.submission);
+      const client = deps.client(config);
+      const paying = tier === "full";
+      const result = paying
+        ? await client.submitBookingRequests({ ...built.submission, payment: "event_checkout" }).catch((error: unknown) => {
+          // No saved cards for this partner, or a Gelatin that doesn't know the option yet (its strict
+          // schema answers 400 invalid_request): Gelatin created nothing, so send it without and pay per DJ.
+          if (error instanceof PartnerApiError && (error.code === "event_checkout_unavailable" || error.code === "invalid_request")) {
+            return client.submitBookingRequests(built.submission);
+          }
+          throw error;
+        })
+        : await client.submitBookingRequests(built.submission);
+      // Only a test-mode embedded checkout is mounted; anything else pays per DJ instead.
+      const checkout = result.event_checkout ? eventCheckoutShape.safeParse(result.event_checkout) : null;
+      if (checkout && !checkout.success) console.error("Refused a Gelatin event checkout that is not a test-mode embedded checkout");
       // Scaffolding: this example has no database, so it keeps the IDs in a
       // signed cookie. Your site stores them with its own event record.
       const cookieName = cookieNames(config).bookings;
@@ -136,10 +158,11 @@ export function createBookingPost(deps: HandlerDeps) {
           venueName: built.submission.event.venue_name,
           ...(built.submission.event.venue_address ? { venueAddress: built.submission.event.venue_address } : {}),
         },
+        ...(checkout?.success ? { eventCheckout: true as const } : {}),
       };
       const saved = { "Set-Cookie": writeBookings(config, [booking, ...existing]) };
       const bookingsPage = `/bookings?event=${encodeURIComponent(booking.eventId)}`;
-      if (tier === "full") return json({ next: bookingsPage }, 201, saved);
+      if (tier === "full") return json({ next: bookingsPage, ...(checkout?.success ? { checkout: checkout.data } : {}) }, 201, saved);
       // Light: straight to Gelatin's portal to take the hold. Its event page
       // lists every DJ in this booking. If the link can't be made, the
       // bookings list has "Manage in Gelatin".
@@ -292,6 +315,13 @@ const paymentSessionShape = z.object({
   client_secret: z.string().max(1000).regex(/^cs_test_[A-Za-z0-9_%]+$/),
   // Sandbox only: this example refuses live keys. Your site would accept pk_live_ in production.
   publishable_key: z.string().max(500).regex(/^pk_test_[A-Za-z0-9]+$/),
+});
+
+/** One checkout for every DJ: the same test-mode embedded checkout, with what it covers. */
+const eventCheckoutShape = paymentSessionShape.extend({
+  total_cents: z.number().int().nonnegative(),
+  currency: z.string().regex(/^[a-z]{3}$/),
+  dj_count: z.number().int().positive(),
 });
 
 /**

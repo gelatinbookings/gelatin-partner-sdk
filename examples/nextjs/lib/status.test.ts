@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { describeStatus, readRequestStatuses, shouldPoll } from "./status";
+import { confirmingSince, describeStatus, readRequestStatuses, shouldPoll } from "./status";
 import type { DemoBooking } from "./cookies";
 
 const booking = (eventId: string, requestIds: string[]): DemoBooking => ({
@@ -73,5 +73,28 @@ describe("demo booking status", () => {
       expect(describeStatus(status).action, status).toBeNull();
       expect(describeStatus(status).label, status).toBeTruthy();
     }
+  });
+});
+
+describe("one checkout for every DJ", () => {
+  it("shows a DJ still waiting as confirming while Gelatin places the holds, then sends them to Gelatin to finish", () => {
+    expect(describeStatus("authorization_required", { eventCheckout: true, confirming: true })).toMatchObject({ label: "Confirming card hold…", action: null, via: null });
+    expect(describeStatus("authorization_required", { eventCheckout: true, confirming: false })).toMatchObject({ label: "Payment needed", action: "Finish payment in Gelatin", via: "gelatin" });
+    // Other statuses, and bookings paid per DJ, read as before.
+    expect(describeStatus("requested", { eventCheckout: true, confirming: true })).toEqual(describeStatus("requested"));
+    expect(describeStatus("authorization_required", { eventCheckout: false, confirming: true })).toEqual(describeStatus("authorization_required"));
+  });
+
+  it("reads as confirming for two minutes after the checkout, and never for a missing or future time", () => {
+    expect(confirmingSince("1000", 1000 + 119_000)).toBe(true);
+    expect(confirmingSince("1000", 1000 + 121_000)).toBe(false);
+    expect(confirmingSince(undefined, 1000)).toBe(false);
+    expect(confirmingSince("5000", 1000)).toBe(false);
+  });
+
+  it("keeps re-reading while the holds are being confirmed", () => {
+    expect(shouldPoll({ r1: "authorization_required" })).toBe(false);
+    expect(shouldPoll({ r1: "authorization_required" }, true)).toBe(true);
+    expect(shouldPoll({ r1: "confirmed" }, true)).toBe(false);
   });
 });

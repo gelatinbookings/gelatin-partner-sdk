@@ -10,6 +10,7 @@
  *   1. listDjs                 DjCatalogQuery          → DjCatalogPage
  *   2. submitBookingRequests   BookingRequest          → BookingRequestResult
  *   3. createPaymentSession    PaymentSessionRequest   → PaymentSessionResult
+ *      or createEventPaymentSession (one checkout for every DJ on the event)
  *   4. createPortalLaunch      PortalLaunchRequest     → PortalLaunchResult
  *   5. getEventBookings        (your event ID)         → EventBookings
  *
@@ -31,6 +32,16 @@ export interface Money {
 
 export type DjTier = "verified" | "top_performer" | "resident" | "city_pillar";
 
+/** A set time for `listDjs`. */
+export interface DjSetWindow {
+  /** ISO 8601 with an offset. */
+  starts_at: string;
+  /** ISO 8601 with an offset; after `starts_at`. */
+  ends_at: string;
+  /** The event's IANA time zone, for example `"America/New_York"`. */
+  time_zone: string;
+}
+
 export interface DjCatalogQuery {
   /**
    * A city, with or without its state: `"Atlanta, GA"`, `"Atlanta"` and
@@ -46,6 +57,12 @@ export interface DjCatalogQuery {
   genre?: string;
   /** `YYYY-MM-DD`. When set, each DJ's `available` is for that night. */
   date?: string;
+  /**
+   * The time the organizer chose for the set, instead of `date`. Each DJ's
+   * `available` is then for that window. Send the same times on the DJ's
+   * request in `submitBookingRequests`.
+   */
+  set?: DjSetWindow;
   /**
    * With `date`: list only the DJs free that night, so a page never holds a
    * DJ the organizer can't book. Needs `date`. Without it, every DJ is
@@ -256,6 +273,14 @@ export interface DjRequest {
   initial_offer: DjOffer;
   /** Defaults to `confirm_and_book`. `make_a_deal` needs `organizer.community_ref`. */
   deal?: PartnerDeal;
+  /**
+   * The time the organizer chose for this DJ's set: ISO 8601 with an offset,
+   * inside the event. Send both or neither. Gelatin checks the DJ against this
+   * window rather than the whole event, and shows it on the public lineup once
+   * the DJ is confirmed.
+   */
+  set_starts_at?: string;
+  set_ends_at?: string;
 }
 
 /** Body of `submitBookingRequests`: one booking with one or more DJs. */
@@ -276,6 +301,12 @@ export interface BookingRequest {
   authorization_placement: AuthorizationPlacement;
   /** Where Gelatin's booking page sends the organizer back. Its origin must be registered with Gelatin. */
   return_url: string;
+  /**
+   * Optional: also open one checkout for every DJ on the event and return it
+   * as `event_checkout`, so your page mounts Stripe from this one call. Needs
+   * `launch:write` as well as `requests:write`, and saved cards on for you.
+   */
+  payment?: "event_checkout";
 }
 
 /** @deprecated Renamed to `BookingRequest`; same shape. */
@@ -305,6 +336,22 @@ export interface BookingRequestResult {
   event_id: string;
   /** One per DJ request, in the order you sent them. */
   engagements: BookingRequestEngagement[];
+  /** Sent only with `payment: "event_checkout"`, when the checkout opened. A replay returns the same open checkout. */
+  event_checkout?: EventPaymentSessionResult;
+  /** Sent only with `payment: "event_checkout"`, when the booking was made but its checkout could not open. */
+  event_checkout_error?: EventCheckoutError;
+}
+
+/**
+ * Why one checkout for the whole event didn't open, and what to do instead:
+ * `nothing_to_pay`, every DJ is held or being held on the event's card, so
+ * read booking status; `event_checkout_unavailable`, create a payment session
+ * for each DJ still `authorization_required`; `temporarily_unavailable`, call
+ * `createEventPaymentSession` again.
+ */
+export interface EventCheckoutError {
+  code: "nothing_to_pay" | "event_checkout_unavailable" | "resource_unavailable" | "temporarily_unavailable";
+  message: string;
 }
 
 // ─── 3. createPaymentSession ────────────────────────────────────────────────
@@ -328,6 +375,26 @@ export interface PaymentSessionResult {
   /** What the organizer authorizes: DJ fee plus Gelatin's service fee and card processing. */
   total_cents: number;
   currency: string;
+}
+
+/** One checkout for every DJ on the organizer's event. Needs saved cards on for you. */
+export interface EventPaymentSessionRequest {
+  external_event_id: string;
+  /** The same organizer ID the booking was sent with. */
+  external_user_id: string;
+}
+
+/**
+ * Mount it exactly like a `PaymentSessionResult`. It saves the organizer's
+ * card (the consent shows inside it); Gelatin then holds each DJ in the
+ * background. Read booking status: a DJ the card couldn't hold stays
+ * `authorization_required`, and a portal launch finishes it.
+ */
+export interface EventPaymentSessionResult extends PaymentSessionResult {
+  /** Every DJ the saved card will hold, fees included. */
+  total_cents: number;
+  /** How many DJs the saved card will hold. */
+  dj_count: number;
 }
 
 // ─── 4. createPortalLaunch ──────────────────────────────────────────────────
@@ -484,6 +551,19 @@ export interface LineupEntry {
   profile_url: string;
   /** An https image URL, or null when the DJ has no photo. */
   image_url: string | null;
+  /**
+   * When the DJ's set starts, as a UTC ISO 8601 instant. Null when no set time
+   * was chosen, and always null on a `pending` entry.
+   */
+  set_starts_at?: string | null;
+  /** When the DJ's set ends. Null under the same conditions as `set_starts_at`. */
+  set_ends_at?: string | null;
+  /**
+   * The sound the DJ is bringing to this set, such as `"R&B / House mix"`, up to
+   * 80 characters of plain text the DJ wrote. Null when they haven't named one,
+   * and always null on a `pending` entry.
+   */
+  sound?: string | null;
 }
 
 /** Who's playing at one of your events, safe to show on a public page. */
