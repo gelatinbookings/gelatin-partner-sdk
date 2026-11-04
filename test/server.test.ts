@@ -592,3 +592,73 @@ describe("partner server client", () => {
   });
 });
 
+
+describe("one DJ's profile and availability", () => {
+  const djId = "7a3f2c1d-4b5e-4f60-8a71-9b8c7d6e5f40";
+  const base = "https://api.gelatin.example/v1/partners/acme";
+  const detail = {
+    id: djId, slug: "synthetic-juniper", name: "Synthetic Juniper", city: "Atlanta", bio: "House and disco.", tier: "resident", experience_level: "pro",
+    image_url: null, gallery: [{ kind: "video", url: "https://www.youtube.com/watch?v=synthetic1", caption: null }],
+    genres: ["House"], draw: null, published_rate_cents: 45_000, rating: { average: 4.5, count: 2 },
+    reviews: [{ text: "Packed the floor.", date: "2031-10-12", venue_name: "The Synthetic Room", reviewer: "Never Parsed" }],
+    listen: [{ platform: "soundcloud", url: "https://soundcloud.com/synthetic-juniper" }],
+    socials: [{ platform: "instagram", handle: "synthetic.juniper", url: "https://www.instagram.com/synthetic.juniper/" }, { platform: "bluesky", handle: null, url: "https://bsky.app/profile/x" }],
+    upcoming_gigs: [{ title: "Rooftop Night", venue_name: "Roof", city: "Decatur", starts_at: "2031-11-15T01:00:00.000Z", ends_at: null, time_zone: "America/New_York", source: "self_listed", ticket_url: null }],
+    profile_page_url: "https://book.acme.example/djs/synthetic-juniper", profile_url: "https://book.acme.example/partner/djs/synthetic-juniper",
+    email: "dj.private@example.test",
+  };
+
+  it("reads one DJ, keeping only the documented fields", async () => {
+    const fetcher = mockFetch(Response.json(detail, { headers: { ETag: '"dj-1"' } }));
+    const client = createPartnerClient({ baseUrl: base, apiKey: "gel_test_private", fetch: fetcher });
+    const result = await client.getDj(djId);
+    const [[url]] = vi.mocked(fetcher).mock.calls as Array<[string, RequestInit]>;
+    expect(new URL(url).pathname).toBe(`/v1/partners/acme/djs/${djId}`);
+    expect(result.modified && result.etag).toBe('"dj-1"');
+    if (!result.modified) throw new Error("expected data");
+    expect(result.data.reviews).toEqual([{ text: "Packed the floor.", date: "2031-10-12", venue_name: "The Synthetic Room" }]);
+    // A platform the SDK doesn't know yet still parses.
+    expect(result.data.socials.map((social) => social.platform)).toEqual(["instagram", "bluesky"]);
+    expect(JSON.stringify(result)).not.toMatch(/dj\.private@|Never Parsed/);
+  });
+
+  it("answers an unchanged DJ with modified false", async () => {
+    const fetcher = mockFetch(new Response(null, { status: 304, headers: { ETag: '"dj-1"' } }));
+    const client = createPartnerClient({ baseUrl: base, apiKey: "gel_test_private", fetch: fetcher });
+    expect(await client.getDj(djId, { ifNoneMatch: '"dj-1"' })).toEqual({ modified: false, etag: '"dj-1"' });
+    const [[, init]] = vi.mocked(fetcher).mock.calls as Array<[string, RequestInit]>;
+    expect(new Headers(init.headers).get("If-None-Match")).toBe('"dj-1"');
+  });
+
+  it("refuses a DJ id that isn't Gelatin's before sending anything", async () => {
+    const fetcher = mockFetch(Response.json(detail));
+    const client = createPartnerClient({ baseUrl: base, apiKey: "gel_test_private", fetch: fetcher });
+    await expect(client.getDj("../cities")).rejects.toThrow(TypeError);
+    await expect(client.getDjAvailability("synthetic-juniper", { from: "2031-11-01", to: "2031-11-02" })).rejects.toThrow(TypeError);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("rejects a profile with an invalid review date", async () => {
+    const fetcher = mockFetch(Response.json({ ...detail, reviews: [{ text: "x", date: "October", venue_name: null }] }));
+    const client = createPartnerClient({ baseUrl: base, apiKey: "gel_test_private", fetch: fetcher });
+    await expect(client.getDj(djId)).rejects.toMatchObject({ code: "invalid_response" });
+  });
+
+  it("reads a DJ's availability for a range, in the event's zone when given", async () => {
+    const body = { dj_id: djId, from: "2031-11-01", to: "2031-11-02", time_zone: "America/New_York", days: [{ date: "2031-11-01", status: "available" }, { date: "2031-11-02", status: "unavailable", reason: "booked" }] };
+    const fetcher = mockFetch(Response.json(body, { headers: { ETag: '"cal-1"' } }));
+    const client = createPartnerClient({ baseUrl: base, apiKey: "gel_test_private", fetch: fetcher });
+    const result = await client.getDjAvailability(djId, { from: "2031-11-01", to: "2031-11-02", time_zone: "America/New_York" });
+    const [[url]] = vi.mocked(fetcher).mock.calls as Array<[string, RequestInit]>;
+    const sent = new URL(url);
+    expect(sent.pathname).toBe(`/v1/partners/acme/djs/${djId}/availability`);
+    expect(Object.fromEntries(sent.searchParams)).toEqual({ from: "2031-11-01", to: "2031-11-02", time_zone: "America/New_York" });
+    expect(result).toEqual({ modified: true, etag: '"cal-1"', data: { ...body, days: [{ date: "2031-11-01", status: "available" }, { date: "2031-11-02", status: "unavailable" }] } });
+  });
+
+  it("rejects a day status it doesn't know", async () => {
+    const fetcher = mockFetch(Response.json({ dj_id: djId, from: "2031-11-01", to: "2031-11-01", time_zone: null, days: [{ date: "2031-11-01", status: "booked" }] }));
+    const client = createPartnerClient({ baseUrl: base, apiKey: "gel_test_private", fetch: fetcher });
+    await expect(client.getDjAvailability(djId, { from: "2031-11-01", to: "2031-11-01" })).rejects.toMatchObject({ code: "invalid_response" });
+  });
+});

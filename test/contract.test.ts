@@ -13,6 +13,8 @@ describe("public partner contract", () => {
     const paths = spec.paths as Record<string, Record<string, Record<string, unknown>>>;
     expect(Object.keys(paths).sort()).toEqual([
       "/v1/partners/{partner}/djs",
+      "/v1/partners/{partner}/djs/{id}",
+      "/v1/partners/{partner}/djs/{id}/availability",
       "/v1/partners/{partner}/cities",
       "/v1/partners/{partner}/city-waitlist",
       "/v1/partners/{partner}/genres",
@@ -43,7 +45,7 @@ describe("public partner contract", () => {
         }
       }
     }
-    expect(ids.size).toBe(17);
+    expect(ids.size).toBe(19);
   });
 
   it("reads a community's standing pull-only, and refuses creates while it owes", () => {
@@ -90,6 +92,30 @@ describe("public partner contract", () => {
     expect(available).toMatchObject({ in: "query", schema: { type: "string", enum: ["true"] } });
     expect(available?.required ?? false).toBe(false);
     expect(available?.description).toMatch(/date/);
+  });
+
+  it("reads one DJ's public profile and availability under catalog:read, with no contact fields", () => {
+    type Operation = { operationId: string; description: string; parameters: Array<{ name: string; in: string; required?: boolean }>; responses: Record<string, { content?: Record<string, { schema: { $ref: string } }> }> };
+    const paths = spec.paths as Record<string, Record<string, Operation>>;
+    const dj = paths["/v1/partners/{partner}/djs/{id}"].get;
+    const availability = paths["/v1/partners/{partner}/djs/{id}/availability"].get;
+    expect([dj.operationId, availability.operationId]).toEqual(["getPartnerDj", "getPartnerDjAvailability"]);
+    for (const operation of [dj, availability]) {
+      expect(operation.description).toMatch(/^Requires catalog:read\. Mounted\./);
+      expect(Object.keys(operation.responses)).toEqual(expect.arrayContaining(["200", "304", "400", "404"]));
+    }
+    expect(dj.parameters.map((parameter) => `${parameter.in}:${parameter.name}`)).toEqual(["path:partner", "path:id", "header:If-None-Match"]);
+    expect(availability.parameters.filter((parameter) => parameter.in === "query").map((parameter) => [parameter.name, parameter.required])).toEqual([["from", true], ["to", true], ["time_zone", false]]);
+    type Schema = { required: string[]; additionalProperties: boolean; properties: Record<string, { items?: { properties: Record<string, unknown> } }> };
+    const schemas = (spec.components as { schemas: Record<string, Schema> }).schemas;
+    const detail = schemas.PartnerDjDetail;
+    expect(detail.additionalProperties).toBe(false);
+    expect([...detail.required].sort()).toEqual(Object.keys(detail.properties).sort());
+    for (const forbidden of ["email", "phone", "contact", "reviewer", "stripe", "payout", "min_rate"]) {
+      expect(JSON.stringify(Object.keys(detail.properties))).not.toContain(forbidden);
+    }
+    expect(Object.keys(detail.properties.reviews.items!.properties).sort()).toEqual(["date", "text", "venue_name"]);
+    expect(Object.keys(schemas.DjAvailability.properties.days.items!.properties).sort()).toEqual(["date", "status"]);
   });
 
   it("has no unresolved component references or bundled runtime dependencies", () => {

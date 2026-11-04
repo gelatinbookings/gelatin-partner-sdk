@@ -2,13 +2,20 @@
 
 ## 0.1.0-alpha.9
 
-Additive: every call and field from alpha.8 works as before, and no field was removed or changed type or value.
+Additive: every call and field from alpha.8 works as before, and no field was removed or changed type or value. Two new calls read one DJ's profile and calendar.
 
 ### New
 
 - **`launch_url`** on `createPortalLaunch`'s result: the one-use link to Gelatin's booking page in its root form, `https://<portal origin>/launch#token=…`. Redirect the organizer to this one.
 - **`profile_page_url`** on catalog DJs (`listDjs`, alternates) and lineup entries: the DJ's profile in its root form, `https://<portal origin>/djs/{slug}` on your portal origin, or Gelatin's `/djs/{slug}` page.
 - Against an older Gelatin server that sends only the old fields, the client fills `launch_url` and `profile_page_url` from `url` and `profile_url`.
+- **`getDj(djId)`**: one catalog DJ's full public profile (`PartnerDjDetail`).
+  - Fields: bio, gallery, genres, verified draw, published rate, rating, anonymous reviews (words, day and venue), listen links, public socials, upcoming public nights, and `profile_page_url` plus the deprecated `profile_url`.
+  - Never contact details: emails, phone numbers and chat links typed into a bio or review come back as `[removed]`.
+  - Conditional with `ifNoneMatch`, like `getEventLineup`. A DJ you can't list is `404 not_found`.
+- **`getDjAvailability(djId, { from, to, time_zone? })`**: each day `available` or `unavailable`, for up to 90 days, by the catalog's availability rules, never saying why (`DjAvailability`).
+- Both refuse an id that isn't a Gelatin DJ ID before sending anything.
+- The OpenAPI spec covers both new routes.
 
 ### Deprecated
 

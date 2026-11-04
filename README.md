@@ -296,6 +296,27 @@ const genre = picked && findGenre(directory, picked) ? picked : undefined;
 const djs = await gelatin.listDjs({ city: "Atlanta, GA", genre, date: "2026-11-14" });
 ```
 
+### One DJ's profile and calendar
+
+When an organizer opens a DJ from your list, `getDj(dj.id)` returns everything public about them:
+- bio, photo and gallery (cover image, set artwork and public video links);
+- every genre, verified draw and published rate;
+- rating and up to ten recent reviews;
+- where to listen, every public social (Instagram and TikTok included);
+- upcoming public nights and the profile links.
+
+It never returns contact details. There's no email or phone, and emails, phone numbers and chat links typed into a bio or review come back as `[removed]`. Reviews carry their words, day and venue only, never who wrote them. A DJ you can't list (unknown, excluded or inactive) is a `404 not_found`, the same as an unknown id.
+
+`getDjAvailability(dj.id, { from, to })` returns each day in the range, `available` or `unavailable`, by the same rules as `listDjs`' `available`. The range is at most 90 days, starting no earlier than yesterday. It never says why a day is busy. Pass the event's `time_zone` to judge each day midnight to midnight there, as a set window is judged. Like the catalog it's advisory: Gelatin checks again when you send the request.
+
+```ts
+const dj = await gelatin.getDj(picked.id);
+if (dj.modified) render(dj.data); // keep dj.etag and pass it as ifNoneMatch next time
+
+const calendar = await gelatin.getDjAvailability(picked.id, { from: "2026-11-01", to: "2026-11-30", time_zone: "America/New_York" });
+if (calendar.modified) markBusy(calendar.data.days.filter((day) => day.status === "unavailable").map((day) => day.date));
+```
+
 ### After a DJ passes
 
 When a request ends without a booking (`getEventBookings` status `declined`, `expired` or `cancelled`), don't leave the slot empty. `listAlternates(eventId, requestId)` returns up to five DJs who are open that night. They're in the event's city (by name, or by a service radius that reaches a bundled city) and either publish a rate within the organizer's last offered fee plus a fifth or publish none. The DJ who passed and every DJ already asked for this event are left out. A request that is still live answers `409 request_active`.
