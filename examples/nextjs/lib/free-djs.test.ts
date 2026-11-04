@@ -3,7 +3,7 @@ import type { DjCatalogPage, PublicDj } from "@gelatinbookings/partner-sdk/types
 import { listFreeDjs } from "./free-djs";
 
 const dj = (id: string, available: boolean): PublicDj => ({
-  id, name: `DJ ${id}`, city: "Atlanta", tier: "verified", profile_url: `https://gelatin.example/djs/${id}`,
+  id, name: `DJ ${id}`, city: "Atlanta", tier: "verified", profile_url: `https://gelatin.example/djs/${id}`, profile_page_url: `https://gelatin.example/djs/${id}`,
   image_url: null, draw: null, genres: [], published_rate_cents: null, available,
 });
 const page = (items: PublicDj[], next_cursor: string | null = null): DjCatalogPage => ({ items, next_cursor });

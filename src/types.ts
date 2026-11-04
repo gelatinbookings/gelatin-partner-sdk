@@ -103,7 +103,14 @@ export interface PublicDj {
   tier: DjTier;
   /**
    * The DJ's public profile: the read-only, co-branded page on your portal
-   * origin when Gelatin has one registered for you, otherwise the Gelatin profile.
+   * origin when Gelatin has one registered for you (`https://<portal>/djs/{slug}`),
+   * otherwise the Gelatin profile. Link to this one.
+   */
+  profile_page_url: string;
+  /**
+   * @deprecated Use `profile_page_url`. The same page in its older
+   * `https://<portal>/partner/djs/{slug}` form, which redirects there. Kept so
+   * existing integrations keep working; no removal date yet.
    */
   profile_url: string;
   /** An https image URL, or null when the DJ has no photo. */
@@ -126,6 +133,116 @@ export interface DjCatalogPage {
   /** Pass as `cursor` for the next page; null on the last page. */
   next_cursor: string | null;
 }
+
+// ─── getDj and getDjAvailability ────────────────────────────────────────────
+
+/** Where a DJ's music or social link points. */
+export type DjLinkPlatform =
+  | "instagram" | "tiktok" | "soundcloud" | "spotify" | "youtube" | "twitch"
+  | "facebook" | "x" | "mixcloud" | "linktree" | "website";
+
+export interface DjGalleryItem {
+  kind: "image" | "video";
+  /** A public https URL: an image file, or a video page such as YouTube. */
+  url: string;
+  caption: string | null;
+}
+
+/** A published review, anonymous: never who wrote it. */
+export interface DjReview {
+  /** The review's words. Contact details a reviewer typed are removed. */
+  text: string;
+  /** `YYYY-MM-DD`, the day it was written. */
+  date: string;
+  /** The venue or event it was about; null when it names none. */
+  venue_name: string | null;
+}
+
+export interface DjUpcomingGig {
+  title: string;
+  venue_name: string | null;
+  city: string | null;
+  /** An instant with an offset. Show it in `time_zone`. */
+  starts_at: string;
+  /** Null when the night has no end time. */
+  ends_at: string | null;
+  time_zone: string;
+  /** `gelatin`: booked or listed through Gelatin. `self_listed`: the DJ added it; unverified. */
+  source: "gelatin" | "self_listed";
+  /** The DJ's own ticket link for a night they listed, when they gave one. */
+  ticket_url: string | null;
+}
+
+/**
+ * Everything public about one DJ in your catalog. Never contact details:
+ * no email, no phone, and contact details typed into the bio or a review are removed.
+ */
+export interface PartnerDjDetail {
+  id: string;
+  slug: string;
+  name: string;
+  city: string;
+  /** The DJ's own words, or null when they wrote none. */
+  bio: string | null;
+  tier: DjTier;
+  experience_level: "newbie" | "intermediate" | "pro";
+  /** The DJ's photo, as on their catalog card. */
+  image_url: string | null;
+  /** Cover image, set artwork and public performance videos; at most 24. */
+  gallery: DjGalleryItem[];
+  /** Every genre the DJ lists, in their order. */
+  genres: string[];
+  draw: DjDraw | null;
+  /** The DJ's published rate. Null means show no rate or price hint at all. */
+  published_rate_cents: number | null;
+  /** Null until someone reviews them. */
+  rating: { average: number; count: number } | null;
+  /** The most recent published reviews with words, newest first; at most 10. */
+  reviews: DjReview[];
+  /** Where to hear the DJ's music. */
+  listen: Array<{ platform: DjLinkPlatform; url: string }>;
+  /** Every public social profile and link the DJ shares. `handle` is null when the link has none. */
+  socials: Array<{ platform: DjLinkPlatform; handle: string | null; url: string }>;
+  /** Public nights still ahead, soonest first; at most 10. */
+  upcoming_gigs: DjUpcomingGig[];
+  /** The same page `PublicDj.profile_page_url` names. */
+  profile_page_url: string;
+  /** @deprecated Use `profile_page_url`. See `PublicDj.profile_url`. */
+  profile_url: string;
+}
+
+export type ConditionalPartnerDj =
+  | { modified: false; etag: string | null }
+  | { modified: true; etag: string | null; data: PartnerDjDetail };
+
+export interface DjAvailabilityQuery {
+  /** First day, `YYYY-MM-DD`. No earlier than yesterday. */
+  from: string;
+  /** Last day, `YYYY-MM-DD`, included. At most 90 days in all. */
+  to: string;
+  /**
+   * The event's time zone, as for `listDjs`' set window. Each day is then
+   * midnight to midnight there. Without it, each day is judged as `listDjs`'
+   * `date` judges it.
+   */
+  time_zone?: string;
+}
+
+export interface DjAvailability {
+  dj_id: string;
+  from: string;
+  to: string;
+  time_zone: string | null;
+  /**
+   * One entry per day, in order. Advisory, like the catalog's `available`:
+   * Gelatin checks again when you send the request. Never says why a day is busy.
+   */
+  days: Array<{ date: string; status: "available" | "unavailable" }>;
+}
+
+export type ConditionalDjAvailability =
+  | { modified: false; etag: string | null }
+  | { modified: true; etag: string | null; data: DjAvailability };
 
 // ─── listCities (feeds listDjs) ─────────────────────────────────────────────
 
@@ -418,6 +535,13 @@ export interface PortalLaunchRequest {
 
 /** A one-use link to Gelatin's booking page. Redirect to it straight away: it expires in about 60 seconds. */
 export interface PortalLaunchResult {
+  /** `https://<portal>/launch#token=…`. Redirect the organizer to this one. */
+  launch_url: string;
+  /**
+   * @deprecated Use `launch_url`. The same one-use link in its older
+   * `https://<portal>/partner/launch#token=…` form, which redirects to
+   * `/launch` keeping the token. No removal date yet.
+   */
   url: string;
   expires_at: string;
 }
@@ -545,8 +669,13 @@ export interface LineupEntry {
   status: LineupStatus;
   /**
    * The DJ's public profile: the co-branded page on your portal origin when
-   * Gelatin has one registered for you, otherwise the Gelatin profile. Link to
-   * it wherever the name is shown.
+   * Gelatin has one registered for you (`https://<portal>/djs/{slug}`),
+   * otherwise the Gelatin profile. Link to it wherever the name is shown.
+   */
+  profile_page_url: string;
+  /**
+   * @deprecated Use `profile_page_url`. The same page in its older
+   * `/partner/djs/{slug}` form, which redirects there. No removal date yet.
    */
   profile_url: string;
   /** An https image URL, or null when the DJ has no photo. */

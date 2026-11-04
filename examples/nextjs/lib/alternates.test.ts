@@ -7,7 +7,7 @@ const alternates: DjAlternates = {
   request_id: "req_1", dj_id: "dj_passed", date: "2032-03-11", city: "Billings, MT",
   budget: { currency: "usd", dj_fee_cents: 40000 },
   event: { name: "Synthetic Night", venue_name: "Synthetic Room", venue_address: "1 Synthetic Ave, Billings, MT 59101", starts_at: "2032-03-12T03:00:00Z", ends_at: "2032-03-12T07:00:00Z", time_zone: "America/Denver" },
-  items: [{ id: "dj_2", name: "Synthetic Near", city: "Billings, MT", tier: "verified", profile_url: "https://gelatin.example/djs/near", image_url: null, draw: null, published_rate_cents: 45000, available: true }],
+  items: [{ id: "dj_2", name: "Synthetic Near", city: "Billings, MT", tier: "verified", profile_url: "https://gelatin.example/djs/near", profile_page_url: "https://gelatin.example/djs/near", image_url: null, draw: null, published_rate_cents: 45000, available: true }],
 };
 const booking: DemoBooking = {
   eventId: "event_1", eventName: "Synthetic Night", createdAt: "2032-01-01T00:00:00Z", organizerId: "org_1",

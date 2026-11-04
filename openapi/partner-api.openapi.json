@@ -173,6 +173,211 @@
         "description": "Requires catalog:read. Only active DJs approved by partner distribution settings, with partner exclusions taking precedence. Only published partner-allowlisted fields; hidden rates stay null. Availability requires a date, payout readiness and no known date conflict; rechecked at each mutation. Unknown or duplicate query parameters are rejected. Responses use Cache-Control: private, no-store."
       }
     },
+    "/v1/partners/{partner}/djs/{id}": {
+      "get": {
+        "summary": "Read one DJ's full public profile",
+        "operationId": "getPartnerDj",
+        "security": [
+          {
+            "PartnerBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "partner",
+            "in": "path",
+            "required": true,
+            "description": "Partner slug; the bearer key must be scoped to this same partner.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Gelatin's DJ ID, as PublicDj.id returns it.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerDjDetail"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Unchanged; no response body",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Requires catalog:read. Mounted. Everything public about one DJ in your catalog: bio, photo and gallery, genres, verified draw, published rate, rating, recent anonymous reviews, listen links, public socials, upcoming public nights and the profile links. The DJ must be one listPartnerDjs can return for you: active, distributed to you, and not excluded. Any other id, including a malformed one, is 404 not_found, the same answer as for an unknown DJ. Never carries contact details: no email or phone, and emails, phone numbers and chat links typed into the bio or a review are replaced with [removed]. Reviews carry their words, day and venue only, never who wrote them. Takes no query parameters; any is 400 invalid_query."
+      }
+    },
+    "/v1/partners/{partner}/djs/{id}/availability": {
+      "get": {
+        "summary": "Read one DJ's day-by-day availability",
+        "operationId": "getPartnerDjAvailability",
+        "security": [
+          {
+            "PartnerBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "partner",
+            "in": "path",
+            "required": true,
+            "description": "Partner slug; the bearer key must be scoped to this same partner.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Gelatin's DJ ID, as PublicDj.id returns it.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "First day, YYYY-MM-DD. No earlier than yesterday (UTC) and no more than two years ahead."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "Last day, YYYY-MM-DD, included. The range is at most 90 days in all."
+          },
+          {
+            "name": "time_zone",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The event's IANA time zone, as for listPartnerDjs' set window. Each day is then midnight to midnight in that zone, checked as a set window is. Without it, each day is judged as listPartnerDjs' date is."
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DjAvailability"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Unchanged; no response body",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Requires catalog:read. Mounted. Each day in the range is available or unavailable, by the same rules as the catalog's available: the DJ can be paid, and has no blackout, live Gelatin booking or published outside night that day. Never says why a day is unavailable or what the DJ is doing. Advisory: Gelatin checks again when you send the request, and reading this holds nothing. The same DJs as getPartnerDj; any other id is 404 not_found. A missing, malformed, reversed or too-long range, an unknown time zone, or any other parameter is 400 invalid_query."
+      }
+    },
     "/v1/partners/{partner}/cities": {
       "get": {
         "summary": "List US states and major cities with this partner's DJ counts",
@@ -1903,10 +2108,16 @@
               "city_pillar"
             ]
           },
+          "profile_page_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The DJ's public profile. By default, the co-branded page on the partner's active portal origin (https://<portal origin>/djs/{slug}), or Gelatin's /djs page when it has none. Gelatin can set a partner to always link to Gelatin's /djs page. Link to this one."
+          },
           "profile_url": {
             "type": "string",
             "format": "uri",
-            "description": "The DJ's public profile. By default, the co-branded page on the partner's active portal origin, or Gelatin's /djs page when it has none. Gelatin can set a partner to always link to Gelatin's /djs page."
+            "deprecated": true,
+            "description": "Deprecated: use profile_page_url. The same page in its older form, https://<portal origin>/partner/djs/{slug} on a portal origin, which redirects (308) to profile_page_url. Kept so existing integrations keep working; no removal date yet. Without a portal origin it equals profile_page_url."
           },
           "image_url": {
             "oneOf": [
@@ -2589,9 +2800,16 @@
           "expires_at"
         ],
         "properties": {
+          "launch_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The one-use portal link, https://<portal origin>/launch#token=…. Redirect the organizer to this one straight away."
+          },
           "url": {
             "type": "string",
-            "format": "uri"
+            "format": "uri",
+            "deprecated": true,
+            "description": "Deprecated: use launch_url. The same one-use link in its older form, https://<portal origin>/partner/launch#token=…, which redirects (308) to /launch keeping the token. Kept so existing integrations keep working; no removal date yet."
           },
           "expires_at": {
             "type": "string",
@@ -3110,10 +3328,16 @@
               "pending"
             ]
           },
+          "profile_page_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The DJ's public profile. By default, the co-branded page on the partner's active portal origin (https://<portal origin>/djs/{slug}), or Gelatin's /djs page when it has none. Gelatin can set a partner to always link to Gelatin's /djs page. Link to this one."
+          },
           "profile_url": {
             "type": "string",
             "format": "uri",
-            "description": "The DJ's public profile. By default, the co-branded page on the partner's active portal origin, or Gelatin's /djs page when it has none. Gelatin can set a partner to always link to Gelatin's /djs page."
+            "deprecated": true,
+            "description": "Deprecated: use profile_page_url. The same page in its older form, https://<portal origin>/partner/djs/{slug} on a portal origin, which redirects (308) to profile_page_url. Kept so existing integrations keep working; no removal date yet. Without a portal origin it equals profile_page_url."
           },
           "image_url": {
             "oneOf": [
@@ -3543,6 +3767,467 @@
           "already_cancelled": {
             "type": "boolean",
             "description": "This booking was cancelled before this call."
+          }
+        }
+      },
+      "PartnerDjDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "One DJ's full public profile. Never contact details.",
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "city",
+          "bio",
+          "tier",
+          "experience_level",
+          "image_url",
+          "gallery",
+          "genres",
+          "draw",
+          "published_rate_cents",
+          "rating",
+          "reviews",
+          "listen",
+          "socials",
+          "upcoming_gigs",
+          "profile_page_url",
+          "profile_url"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "bio": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The DJ's own words, with emails, phone numbers and chat links replaced by [removed]. Null when they wrote none."
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "verified",
+              "top_performer",
+              "resident",
+              "city_pillar"
+            ]
+          },
+          "experience_level": {
+            "type": "string",
+            "enum": [
+              "newbie",
+              "intermediate",
+              "pro"
+            ]
+          },
+          "image_url": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "gallery": {
+            "type": "array",
+            "maxItems": 24,
+            "description": "The cover image, hosted set artwork and public performance videos (outside video pages such as YouTube). Public URLs only; uploaded video files aren't included.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "url",
+                "caption"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "image",
+                    "video"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "caption": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "genres": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Every genre the DJ lists, in their order; empty when none."
+          },
+          "draw": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Verified draw: venue-confirmed head counts over the window, excluding disputed and auto-confirmed ones. Null when the DJ has no verified night; never 0.",
+                "required": [
+                  "min",
+                  "max",
+                  "avg",
+                  "window"
+                ],
+                "properties": {
+                  "min": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "max": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "avg": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "window": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "published_rate_cents": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rating": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "average",
+                  "count"
+                ],
+                "properties": {
+                  "average": {
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 5
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reviews": {
+            "type": "array",
+            "maxItems": 10,
+            "description": "The most recent published reviews with words, newest first. Anonymous: never who wrote them.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "text",
+                "date",
+                "venue_name"
+              ],
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "With emails, phone numbers and chat links replaced by [removed]."
+                },
+                "date": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "venue_name": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "listen": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "platform",
+                "url"
+              ],
+              "properties": {
+                "platform": {
+                  "type": "string",
+                  "enum": [
+                    "instagram",
+                    "tiktok",
+                    "soundcloud",
+                    "spotify",
+                    "youtube",
+                    "twitch",
+                    "facebook",
+                    "x",
+                    "mixcloud",
+                    "linktree",
+                    "website"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              }
+            }
+          },
+          "socials": {
+            "type": "array",
+            "description": "Every public social profile and link the DJ shares, Instagram and TikTok included. Chat links (WhatsApp, Telegram and the like) are left out.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "platform",
+                "handle",
+                "url"
+              ],
+              "properties": {
+                "platform": {
+                  "type": "string",
+                  "enum": [
+                    "instagram",
+                    "tiktok",
+                    "soundcloud",
+                    "spotify",
+                    "youtube",
+                    "twitch",
+                    "facebook",
+                    "x",
+                    "mixcloud",
+                    "linktree",
+                    "website"
+                  ]
+                },
+                "handle": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              }
+            }
+          },
+          "upcoming_gigs": {
+            "type": "array",
+            "maxItems": 10,
+            "description": "Public nights still ahead, soonest first: what the DJ's public profile lists.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "title",
+                "venue_name",
+                "city",
+                "starts_at",
+                "ends_at",
+                "time_zone",
+                "source",
+                "ticket_url"
+              ],
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "venue_name": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "city": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "starts_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "ends_at": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "time_zone": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "gelatin",
+                    "self_listed"
+                  ],
+                  "description": "gelatin: booked or listed through Gelatin. self_listed: the DJ added it; unverified."
+                },
+                "ticket_url": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "profile_page_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The DJ's public profile. By default, the co-branded page on the partner's active portal origin (https://<portal origin>/djs/{slug}), or Gelatin's /djs page when it has none. Gelatin can set a partner to always link to Gelatin's /djs page. Link to this one."
+          },
+          "profile_url": {
+            "type": "string",
+            "format": "uri",
+            "deprecated": true,
+            "description": "Deprecated: use profile_page_url. The same page in its older form, https://<portal origin>/partner/djs/{slug} on a portal origin, which redirects (308) to profile_page_url. Kept so existing integrations keep working; no removal date yet. Without a portal origin it equals profile_page_url."
+          }
+        }
+      },
+      "DjAvailability": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "dj_id",
+          "from",
+          "to",
+          "time_zone",
+          "days"
+        ],
+        "properties": {
+          "dj_id": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string",
+            "format": "date"
+          },
+          "to": {
+            "type": "string",
+            "format": "date"
+          },
+          "time_zone": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "days": {
+            "type": "array",
+            "maxItems": 90,
+            "description": "One entry per day, in order. Never says why a day is unavailable.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "date",
+                "status"
+              ],
+              "properties": {
+                "date": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "available",
+                    "unavailable"
+                  ]
+                }
+              }
+            }
           }
         }
       }

@@ -214,7 +214,7 @@ describe("booking submission", () => {
 
     it("never asks for it on Light", async () => {
       const submitBookingRequests = vi.fn(async () => ({ group_id: "g", event_id: "e", engagements }));
-      const createPortalLaunch = vi.fn(async () => ({ url: `https://book-demo.staging.gelatinbookings.com/partner/launch#token=${token}`, expires_at: "2030-01-01T00:00:00Z" }));
+      const createPortalLaunch = vi.fn(async () => ({ launch_url: `https://book-demo.staging.gelatinbookings.com/partner/launch#token=${token}`, url: `https://book-demo.staging.gelatinbookings.com/partner/launch#token=${token}`, expires_at: "2030-01-01T00:00:00Z" }));
       const light = `${sessionCookie()}; ${names.tier}=light`;
       await createBookingPost(deps({ submitBookingRequests, createPortalLaunch }))(post("/api/bookings", form, { cookie: light }));
       expect((submitBookingRequests.mock.calls[0] as unknown as [{ payment?: string }])[0]).not.toHaveProperty("payment");
@@ -279,7 +279,7 @@ describe("portal launch", () => {
   const withBooking = () => `${sessionCookie()}; ${cookieValue(writeBookings(config, [booking]))}`;
 
   it("launches only a booking from this browser, as its original organizer, and returns an approved URL", async () => {
-    const createPortalLaunch = vi.fn(async () => ({ url: `https://book-demo.staging.gelatinbookings.com/partner/launch#token=${token}`, expires_at: "2030-01-01T00:01:00Z" }));
+    const createPortalLaunch = vi.fn(async () => ({ launch_url: `https://book-demo.staging.gelatinbookings.com/partner/launch#token=${token}`, url: `https://book-demo.staging.gelatinbookings.com/partner/launch#token=${token}`, expires_at: "2030-01-01T00:01:00Z" }));
     const response = await createLaunchPost(deps({ createPortalLaunch }))(post("/api/launch", { event_id: booking.eventId, request_id: REQUEST_ID }, { cookie: withBooking() }));
 
     expect(response.status).toBe(200);
@@ -295,7 +295,7 @@ describe("portal launch", () => {
   });
 
   it("refuses unknown bookings, forged booking cookies and launch URLs off the allowlist", async () => {
-    const createPortalLaunch = vi.fn(async () => ({ url: `https://evil.example/partner/launch#token=${token}`, expires_at: "x" }));
+    const createPortalLaunch = vi.fn(async () => ({ launch_url: `https://evil.example/partner/launch#token=${token}`, url: `https://evil.example/partner/launch#token=${token}`, expires_at: "x" }));
     const handler = createLaunchPost(deps({ createPortalLaunch }));
     expect((await handler(post("/api/launch", { event_id: booking.eventId, request_id: "44444444-4444-4444-8444-444444444444" }, { cookie: withBooking() }))).status).toBe(404);
     const forged = `${sessionCookie()}; ${names.bookings}=${Buffer.from(JSON.stringify([booking])).toString("base64url")}.bad`;
@@ -307,6 +307,9 @@ describe("portal launch", () => {
   it("accepts only Gelatin's launch path with a fragment token", () => {
     const allowed = new Set(["https://book-demo.staging.gelatinbookings.com"]);
     expect(approvedLaunchUrl(`https://book-demo.staging.gelatinbookings.com/partner/launch#token=${token}`, allowed)).not.toBeNull();
+    // The portal at the root.
+    expect(approvedLaunchUrl(`https://book-demo.staging.gelatinbookings.com/launch#token=${token}`, allowed)).not.toBeNull();
+    expect(approvedLaunchUrl(`https://book-demo.staging.gelatinbookings.com/launchx#token=${token}`, allowed)).toBeNull();
     expect(approvedLaunchUrl(`https://book-demo.staging.gelatinbookings.com/elsewhere#token=${token}`, allowed)).toBeNull();
     expect(approvedLaunchUrl(`https://book-demo.staging.gelatinbookings.com/partner/launch?token=${token}`, allowed)).toBeNull();
     expect(approvedLaunchUrl(`https://book-demo.staging.gelatinbookings.com.evil.example/partner/launch#token=${token}`, allowed)).toBeNull();
@@ -502,7 +505,7 @@ describe("Light / Full tier", () => {
   it("sends a Light booking for Gelatin's portal to take the hold, and goes straight there", async () => {
     const submitBookingRequests = vi.fn(async () => ({ group_id: "g", event_id: "e", engagements: [engagement] }));
     const launchUrl = `https://book-demo.staging.gelatinbookings.com/partner/launch#token=${token}`;
-    const createPortalLaunch = vi.fn(async () => ({ url: launchUrl, expires_at: "2030-01-01T00:01:00Z" }));
+    const createPortalLaunch = vi.fn(async () => ({ launch_url: launchUrl, url: launchUrl, expires_at: "2030-01-01T00:01:00Z" }));
     const response = await createBookingPost(deps({ submitBookingRequests, createPortalLaunch }))(post("/api/bookings", form, { cookie: lightCookie() }));
     expect(response.status).toBe(201);
     const [packet] = submitBookingRequests.mock.calls[0] as unknown as [{ authorization_placement: string; organizer: { external_user_id: string } }];
@@ -521,7 +524,7 @@ describe("Light / Full tier", () => {
     const response = await createBookingPost(deps({ submitBookingRequests, createPortalLaunch }))(post("/api/bookings", form, { cookie: lightCookie() }));
     expect(response.status).toBe(201);
     expect(await response.json()).toEqual({ next: `/bookings?event=demo-evt-${form.nonce}` });
-    const outside = vi.fn(async () => ({ url: "https://evil.example.test/partner/launch#token=x", expires_at: "2030-01-01T00:01:00Z" }));
+    const outside = vi.fn(async () => ({ launch_url: "https://evil.example.test/partner/launch#token=x", url: "https://evil.example.test/partner/launch#token=x", expires_at: "2030-01-01T00:01:00Z" }));
     const refused = await createBookingPost(deps({ submitBookingRequests, createPortalLaunch: outside }))(post("/api/bookings", form, { cookie: lightCookie() }));
     expect(await refused.json()).toEqual({ next: `/bookings?event=demo-evt-${form.nonce}` });
   });

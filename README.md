@@ -101,7 +101,7 @@ const launch = await gelatin.createPortalLaunch({
   resource: { kind: "request", id: booking.engagements[0].request_id },
   return_url: "https://your-site.example/events/event_123",
 });
-redirect(launch.url);
+redirect(launch.launch_url);
 
 // 4. The organizer comes back to your return_url.
 
@@ -114,6 +114,17 @@ A runnable version is in [`examples/quickstart.ts`](examples/quickstart.ts).
 For a complete website, see the [Next.js partner example](examples/nextjs/README.md): a small events site you can run against the sandbox and click through the whole journey, including payment, the DJ's reply and live status.
 
 Gelatin never calls your server. Status is pull-only: read it when the organizer comes back, when they open the event, or on a schedule. Pass `{ ifNoneMatch: lastEtag }` to skip unchanged reads: the result is `{ modified: false }` until something changes, then `{ modified: true, etag, data }`.
+
+## Portal URLs: use `launch_url` and `profile_page_url`
+
+Gelatin's organizer portal lives at the root of your portal host (`/launch`, `/events`, `/djs/{slug}`, …). Every portal URL the API returns comes in two forms:
+
+| Use | Deprecated (no removal date yet) |
+| --- | --- |
+| `createPortalLaunch(...).launch_url`: `https://<portal origin>/launch#token=…` | `url`: the same link as `/partner/launch#token=…` |
+| `profile_page_url` on catalog DJs, alternates and lineup entries: `https://<portal origin>/djs/{slug}` | `profile_url`: the same page as `/partner/djs/{slug}` |
+
+The deprecated forms keep working: they redirect to the root page, keeping the `#token=…`. Move when you're ready. If your code checks the launch URL's path, accept `/launch`. Against an older Gelatin server that sends only the old fields, the client fills `launch_url` and `profile_page_url` from them.
 
 ## Taking payment: two ways
 
@@ -134,7 +145,7 @@ Listing DJs needs `catalog:read` either way, so one key with all four scopes cov
 ### Light: pay in Gelatin's portal
 
 1. Submit with `authorization_placement: "gelatin_portal_handoff"`.
-2. When the organizer clicks to pay, call `createPortalLaunch`. It returns `{ url, expires_at }`: a one-use link to Gelatin's co-branded booking page that expires in about 60 seconds. Redirect straight away, and never make one ahead of time. Each call gets a fresh key, so each click gets a new link.
+2. When the organizer clicks to pay, call `createPortalLaunch`. It returns `{ launch_url, url, expires_at }`: `launch_url` is a one-use link to Gelatin's co-branded booking page that expires in about 60 seconds (`url` is the same link in its deprecated older form; see [Portal URLs](#portal-urls-use-launch_url-and-profile_page_url)). Redirect straight away, and never make one ahead of time. Each call gets a fresh key, so each click gets a new link.
 3. The organizer reviews and pays there. Gelatin's page links back to your `return_url`, whose origin must be registered with Gelatin.
 4. When they're back, read `getEventBookings`. A DJ still waiting for the card hold is `authorization_required`, and becomes `requested` once the hold is placed.
 
@@ -169,11 +180,11 @@ The Next.js example's [`app/pay-button.tsx`](examples/nextjs/app/pay-button.tsx)
 
 ## One checkout for every DJ (saved card)
 
-> **Off by default, testing only.** This is a per-partner switch that Gelatin sets for you (`organizer_card_mode`: `per_hold`, the default, or `saved_card`). It isn't released for live money until the consent wording, Gelatin's Terms and your agreement to it are signed off. Until then the consent text is a draft and is labelled as one.
+> **Off by default, testing only.** This is a per-partner switch that Gelatin sets for you (`organizer_card_mode`: `per_hold`, the default, or `saved_card`). It isn't released for live money until Gelatin's Terms and your agreement to it are signed off. The consent wording itself is final.
 
 With it on, an organizer booking several DJs enters their card once per event instead of once per DJ. Gelatin still holds and charges each DJ separately. A saved card belongs to the one event it was saved for: it only ever holds that event's DJs, and the organizer's next event gets its own checkout and its own card. Gelatin never shows or reuses one event's card on another event; Stripe's own Link or the browser may offer to fill the card in.
 
-**What the organizer sees, on the portal's event page (`/partner/event`, "All DJs for this event"):**
+**What the organizer sees, on the portal's event page (`/event`, "All DJs for this event"):**
 
 1. A "Pay once for your DJs" panel lists the DJs whose offers are waiting for a hold, with the total, and a consent checkbox.
 2. "Save card and hold for …" opens one embedded Stripe Checkout in **setup mode**. It saves the card and charges nothing.
@@ -285,6 +296,27 @@ const genre = picked && findGenre(directory, picked) ? picked : undefined;
 const djs = await gelatin.listDjs({ city: "Atlanta, GA", genre, date: "2026-11-14" });
 ```
 
+### One DJ's profile and calendar
+
+When an organizer opens a DJ from your list, `getDj(dj.id)` returns everything public about them:
+- bio, photo and gallery (cover image, set artwork and public video links);
+- every genre, verified draw and published rate;
+- rating and up to ten recent reviews;
+- where to listen, every public social (Instagram and TikTok included);
+- upcoming public nights and the profile links.
+
+It never returns contact details. There's no email or phone, and emails, phone numbers and chat links typed into a bio or review come back as `[removed]`. Reviews carry their words, day and venue only, never who wrote them. A DJ you can't list (unknown, excluded or inactive) is a `404 not_found`, the same as an unknown id.
+
+`getDjAvailability(dj.id, { from, to })` returns each day in the range, `available` or `unavailable`, by the same rules as `listDjs`' `available`. The range is at most 90 days, starting no earlier than yesterday. It never says why a day is busy. Pass the event's `time_zone` to judge each day midnight to midnight there, as a set window is judged. Like the catalog it's advisory: Gelatin checks again when you send the request.
+
+```ts
+const dj = await gelatin.getDj(picked.id);
+if (dj.modified) render(dj.data); // keep dj.etag and pass it as ifNoneMatch next time
+
+const calendar = await gelatin.getDjAvailability(picked.id, { from: "2026-11-01", to: "2026-11-30", time_zone: "America/New_York" });
+if (calendar.modified) markBusy(calendar.data.days.filter((day) => day.status === "unavailable").map((day) => day.date));
+```
+
 ### After a DJ passes
 
 When a request ends without a booking (`getEventBookings` status `declined`, `expired` or `cancelled`), don't leave the slot empty. `listAlternates(eventId, requestId)` returns up to five DJs who are open that night. They're in the event's city (by name, or by a service radius that reaches a bundled city) and either publish a rate within the organizer's last offered fee plus a fifth or publish none. The DJ who passed and every DJ already asked for this event are left out. A request that is still live answers `409 request_active`.
@@ -304,7 +336,7 @@ For a public event page, read the lineup rather than the status feed. It carries
 
 ```ts
 const lineup = await gelatin.getEventLineup("event_123", { includePending: true, ifNoneMatch: lastEtag });
-if (lineup.modified) renderLineup(lineup.data.entries); // each entry: dj_id, name, status, profile_url, image_url, set_starts_at, set_ends_at, sound
+if (lineup.modified) renderLineup(lineup.data.entries); // each entry: dj_id, name, status, profile_page_url, profile_url (deprecated), image_url, set_starts_at, set_ends_at, sound
 ```
 
 When the organizer chooses a DJ's set time in your flow, pass it to `listDjs({ set: { starts_at, ends_at, time_zone } })` in place of `date`, so `available` answers for that window, and send the same `set_starts_at` and `set_ends_at` on the DJ's request. The DJ names their own `sound` on their booking; the lineup returns it once they are confirmed, and nothing on a `pending` entry.
@@ -313,7 +345,7 @@ When the organizer chooses a DJ's set time in your flow, pass it to `listDjs({ s
 
 Three behaviours are set per partner by Gelatin and default to the full integration; ask Gelatin to change them. Field names and types never change, only the values:
 
-- `profile_url` opens the DJ's co-branded page on your registered portal origin, or Gelatin's own `/djs/{slug}` page when you have none or choose Gelatin links.
+- `profile_page_url` opens the DJ's co-branded page on your registered portal origin, or Gelatin's own `/djs/{slug}` page when you have none or choose Gelatin links. The deprecated `profile_url` is the same page.
 - `city` in `listDjs`, `listGenres` and alternates, and the counts in `listCities`, include other spellings of the city and DJs whose service radius covers it. With exact-name matching, only DJs whose profile city is exactly the text you send match.
 - After a DJ passes, Gelatin's booking page can send the organizer back to your `return_url` with an Offer link (default), show the list only, or let the organizer send the offer to another DJ right there, so you need no code for alternates.
 

@@ -17,7 +17,7 @@ function initials(name: string) {
 export function toPublicLineup(lineup: EventLineup): PublicLineupRow[] {
   return lineup.entries
     .filter((entry) => entry.status === "confirmed")
-    .map((entry) => ({ id: entry.dj_id, name: entry.name, initials: initials(entry.name), profileUrl: https(entry.profile_url), imageUrl: https(entry.image_url) }));
+    .map((entry) => ({ id: entry.dj_id, name: entry.name, initials: initials(entry.name), profileUrl: https(entry.profile_page_url), imageUrl: https(entry.image_url) }));
 }
 
 /** "Sat, Nov 14, 2026" and "10:00 PM – 2:00 AM EST", in the event's own time zone. */

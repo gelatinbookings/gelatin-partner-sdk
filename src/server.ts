@@ -11,8 +11,13 @@ import type {
   CityWaitlistRequest,
   CityWaitlistResult,
   ConditionalEventBookings,
+  ConditionalDjAvailability,
   ConditionalEventLineup,
+  ConditionalPartnerDj,
   DjAlternates,
+  DjAvailability,
+  DjAvailabilityQuery,
+  DjLinkPlatform,
   DjCatalogPage,
   DjCatalogQuery,
   EventBookings,
@@ -32,6 +37,7 @@ import type {
   PaymentSessionRequest,
   PaymentSessionResult,
   PartnerBookingStatus,
+  PartnerDjDetail,
   PublicDj,
   SubmissionResult,
 } from "./types.js";
@@ -139,6 +145,8 @@ function publicDj(item: unknown): PublicDj {
     city: string(row.city),
     tier: literal(row.tier, TIERS) as PublicDj["tier"],
     profile_url: string(row.profile_url),
+    // Additive: a server that predates it sends only profile_url.
+    profile_page_url: row.profile_page_url === undefined ? string(row.profile_url) : string(row.profile_page_url),
     image_url: optionalString(row.image_url),
     // avg is newer than min/max/window, so an API that doesn't send it still parses.
     draw: draw ? { min: integer(draw.min), max: integer(draw.max), avg: draw.avg === undefined ? null : integer(draw.avg), window: string(draw.window) } : null,
@@ -325,7 +333,8 @@ function cancellationResult(value: unknown): CancellationResult {
 
 function launchResult(value: unknown): PortalLaunchResult {
   const body = object(value);
-  return { url: string(body.url), expires_at: string(body.expires_at) };
+  // Additive: a server that predates launch_url sends only url.
+  return { launch_url: body.launch_url === undefined ? string(body.url) : string(body.launch_url), url: string(body.url), expires_at: string(body.expires_at) };
 }
 
 function paymentSessionResult(value: unknown): PaymentSessionResult {
@@ -378,6 +387,81 @@ function eventBookings(value: unknown): EventBookings {
   };
 }
 
+const LEVELS = new Set(["newbie", "intermediate", "pro"]);
+const GALLERY_KINDS = new Set(["image", "video"]);
+const GIG_SOURCES = new Set(["gelatin", "self_listed"]);
+const DAY_STATUSES = new Set(["available", "unavailable"]);
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+function day(value: unknown): string {
+  if (typeof value !== "string" || !DAY.test(value)) return invalidResponse();
+  return value;
+}
+
+/** A platform this SDK doesn't know yet still parses; show it as a plain link. */
+function platform(value: unknown): DjLinkPlatform {
+  return string(value) as DjLinkPlatform;
+}
+
+function partnerDj(value: unknown): PartnerDjDetail {
+  const row = object(value);
+  const card = publicDj({ ...row, available: false });
+  const rating = row.rating === null ? null : object(row.rating);
+  if (rating && (typeof rating.average !== "number" || !Number.isFinite(rating.average))) return invalidResponse();
+  return {
+    id: card.id, slug: string(row.slug), name: card.name, city: card.city,
+    bio: optionalString(row.bio), tier: card.tier,
+    experience_level: literal(row.experience_level, LEVELS) as PartnerDjDetail["experience_level"],
+    image_url: card.image_url,
+    gallery: array(row.gallery).map((item) => {
+      const entry = object(item);
+      return { kind: literal(entry.kind, GALLERY_KINDS) as "image" | "video", url: string(entry.url), caption: optionalString(entry.caption) };
+    }),
+    genres: array(row.genres).map(string),
+    draw: card.draw,
+    published_rate_cents: card.published_rate_cents,
+    rating: rating ? { average: rating.average as number, count: integer(rating.count) } : null,
+    reviews: array(row.reviews).map((item) => {
+      const review = object(item);
+      return { text: string(review.text), date: day(review.date), venue_name: optionalString(review.venue_name) };
+    }),
+    listen: array(row.listen).map((item) => {
+      const link = object(item);
+      return { platform: platform(link.platform), url: string(link.url) };
+    }),
+    socials: array(row.socials).map((item) => {
+      const link = object(item);
+      return { platform: platform(link.platform), handle: optionalString(link.handle), url: string(link.url) };
+    }),
+    upcoming_gigs: array(row.upcoming_gigs).map((item) => {
+      const gig = object(item);
+      return {
+        title: string(gig.title), venue_name: optionalString(gig.venue_name), city: optionalString(gig.city),
+        starts_at: string(gig.starts_at), ends_at: optionalString(gig.ends_at), time_zone: string(gig.time_zone),
+        source: literal(gig.source, GIG_SOURCES) as "gelatin" | "self_listed", ticket_url: optionalString(gig.ticket_url),
+      };
+    }),
+    profile_page_url: card.profile_page_url,
+    profile_url: card.profile_url,
+  };
+}
+
+function djAvailability(value: unknown): DjAvailability {
+  const body = object(value);
+  return {
+    dj_id: string(body.dj_id), from: day(body.from), to: day(body.to), time_zone: optionalString(body.time_zone),
+    days: array(body.days).map((item) => {
+      const entry = object(item);
+      return { date: day(entry.date), status: literal(entry.status, DAY_STATUSES) as "available" | "unavailable" };
+    }),
+  };
+}
+
+function djRef(value: string): string {
+  if (!UUID.test(value)) throw new TypeError("A DJ id is Gelatin's DJ ID, as PublicDj.id returns it");
+  return encodeURIComponent(value);
+}
+
 function eventLineup(value: unknown): EventLineup {
   const body = object(value);
   return {
@@ -389,6 +473,8 @@ function eventLineup(value: unknown): EventLineup {
         name: string(row.name),
         status: literal(row.status, LINEUP_STATUSES),
         profile_url: string(row.profile_url),
+        // Additive: a server that predates it sends only profile_url.
+        profile_page_url: row.profile_page_url === undefined ? string(row.profile_url) : string(row.profile_page_url),
         image_url: optionalString(row.image_url),
         // Additive fields: a server that predates them sends none.
         set_starts_at: row.set_starts_at === undefined ? null : optionalString(row.set_starts_at),
@@ -622,6 +708,34 @@ export function createPartnerClient(options: PartnerClientOptions) {
       if (query.limit !== undefined) params.set("limit", String(query.limit));
       const path = `djs${params.size ? `?${params}` : ""}`;
       return json(await request(path, "GET", undefined, options), catalog);
+    },
+    /**
+     * Mounted route. Everything public about one DJ from `listDjs`: bio,
+     * gallery, genres, draw, rate, rating, anonymous reviews, listen links,
+     * socials and upcoming public nights. Never contact details. A DJ you
+     * can't list (unknown, excluded or inactive) is a 404 `not_found`.
+     * Pass the last `etag` as `ifNoneMatch` to get `{ modified: false }`.
+     */
+    async getDj(djId: string, options: ReadOptions & { ifNoneMatch?: string } = {}): Promise<ConditionalPartnerDj> {
+      const response = await request(`djs/${djRef(djId)}`, "GET", undefined, options);
+      const etag = response.headers.get("ETag");
+      if (response.status === 304) return { modified: false, etag };
+      return { modified: true, etag, data: await json(response, partnerDj) };
+    },
+    /**
+     * Mounted route. Each day from `from` to `to` (at most 90), `available` or
+     * `unavailable`, by the same rules as `listDjs`' `available`. Never says
+     * why. Advisory: Gelatin checks again when you send the request. Pass the
+     * event's `time_zone` to judge each day midnight to midnight there.
+     */
+    async getDjAvailability(djId: string, query: DjAvailabilityQuery, options: ReadOptions & { ifNoneMatch?: string } = {}): Promise<ConditionalDjAvailability> {
+      if (!DAY.test(query.from) || !DAY.test(query.to)) throw new TypeError("from and to are YYYY-MM-DD dates");
+      const params = new URLSearchParams({ from: query.from, to: query.to });
+      if (query.time_zone) params.set("time_zone", query.time_zone);
+      const response = await request(`djs/${djRef(djId)}/availability?${params}`, "GET", undefined, options);
+      const etag = response.headers.get("ETag");
+      if (response.status === 304) return { modified: false, etag };
+      return { modified: true, etag, data: await json(response, djAvailability) };
     },
     /**
      * Mounted route. Every US state with its major cities (`US_MAJOR_CITIES`

@@ -4,7 +4,7 @@ import { budgetFromSearch, toCatalogDj } from "./catalog-view";
 
 const dj = (overrides: Partial<PublicDj> = {}): PublicDj => ({
   id: "dj_1", name: "Synthetic DJ", city: "Atlanta", tier: "verified",
-  profile_url: "https://gelatin.example/djs/synthetic-dj", image_url: null,
+  profile_url: "https://gelatin.example/djs/synthetic-dj", profile_page_url: "https://gelatin.example/djs/synthetic-dj", image_url: null,
   draw: null, genres: [], published_rate_cents: null, available: true,
   ...overrides,
 });
@@ -34,7 +34,7 @@ describe("catalog card display rules", () => {
   });
 
   it("keeps only https images and profile links", () => {
-    expect(toCatalogDj(dj({ image_url: "http://insecure.example/dj.jpg", profile_url: "javascript:alert(1)" }))).toMatchObject({ imageUrl: null, profileUrl: null });
+    expect(toCatalogDj(dj({ image_url: "http://insecure.example/dj.jpg", profile_url: "javascript:alert(1)", profile_page_url: "javascript:alert(1)" }))).toMatchObject({ imageUrl: null, profileUrl: null });
     expect(toCatalogDj(dj({ image_url: "https://images.example/dj.jpg" })).imageUrl).toBe("https://images.example/dj.jpg");
   });
 
