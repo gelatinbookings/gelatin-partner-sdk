@@ -789,6 +789,7 @@ export interface CancellationPreview {
   currency: string;
   /** What was charged to the organizer's card; zero while it's only held. */
   charged_cents: number;
+  /** Refunded from a charge. Zero when nothing was charged: a released hold is not a refund (see `hold_released`). */
   refund_cents: number;
   dj_keeps_cents: number;
   gelatin_keeps_cents: number;
@@ -829,4 +830,58 @@ export interface OrganizerStanding {
   amount_owed: Money;
   /** Oldest first. */
   owed: OwedAmount[];
+}
+
+// ─── getEventQuote (before the organizer pays) ──────────────────────────────
+
+/** One DJ on a quote: what holding them costs, from their current offer's stored figures. */
+export interface EventQuoteLine {
+  /** Your `DjRequest.external_request_id`. */
+  external_request_id: string;
+  request_id: string;
+  dj_id: string;
+  dj_name: string;
+  /** The DJ's set, or the whole event when no set was chosen. ISO 8601. */
+  starts_at: string;
+  ends_at: string;
+  /** The DJ's fee, Gelatin's service fee and card processing; they add up to `total_cents`. */
+  dj_fee_cents: number;
+  service_fee_cents: number;
+  processing_fee_cents: number;
+  /** Exactly what the hold for this DJ is for. */
+  total_cents: number;
+  /** `dj_accepts`: charged only if the DJ accepts. `on_hold`: the DJ already agreed, so it's charged once held. */
+  charged: "dj_accepts" | "on_hold";
+  /** When the DJ must answer by; an unanswered hold is released then. ISO 8601. */
+  respond_by: string;
+}
+
+/**
+ * What the organizer is about to authorize for an event: every DJ still
+ * waiting for a payment hold, with each fee line and the total, what happens
+ * to the money, and the cancellation terms. Every figure is the stored offer's,
+ * the same one the hold is placed for, so the quote and the charge can't differ.
+ * The quote number changes whenever any line does.
+ */
+export interface EventQuote {
+  external_event_id: string;
+  /** `GQ-XXXX-XXXX`: the same lines always give the same number. */
+  quote_number: string;
+  issued_at: string;
+  /** The first DJ's answer deadline, or the first set's start if sooner. ISO 8601; null when `djs` is empty. */
+  valid_until: string | null;
+  currency: string;
+  event: { name: string; venue_name: string; time_zone: string };
+  /** Empty when nothing on the event is waiting for a hold. */
+  djs: EventQuoteLine[];
+  dj_fee_cents: number;
+  service_fee_cents: number;
+  processing_fee_cents: number;
+  total_cents: number;
+  /** What happens to the money, in plain words, in order. */
+  payment_steps: string[];
+  /** Gelatin's partner cancellation policy, in order: when each part applies, and what it means. */
+  cancellation_terms: Array<{ code: string; when: string; text: string }>;
+  /** Gelatin's Terms of Service, which the organizer agrees to with the quote. */
+  terms_url: string;
 }

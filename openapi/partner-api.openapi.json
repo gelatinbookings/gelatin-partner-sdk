@@ -1196,6 +1196,72 @@
         "description": "Requires bookings:read. Mounted. Who is playing at one of your events, safe to show on a public event page: each DJ's id, name, public profile link and photo, plus a confirmed DJ's set time and sound when known, and nothing about price, offers or the organizer. Resolves the event only through the authenticated partner's own external_event_id; an unknown event and another partner's event both return the same 404. By default it lists only DJs whose booking is confirmed (Gelatin recorded the signed capture). include=pending also lists DJs who have the offer and haven't settled it (requested, negotiating or reauthorization_required in getEventBookings) with status pending; a request still waiting for the organizer's first card hold is never listed, because the DJ hasn't seen it. Declined, expired and cancelled bookings are simply absent. Pending entries carry no set time or sound. Entries with a set time come first, in time order. A DJ appears once per event, and a DJ removed from your catalog distribution is left out. Link the name to profile_url wherever it is shown. ETag and If-None-Match return 304 with no body. Responses use Cache-Control: private, no-store."
       }
     },
+    "/v1/partners/{partner}/events/{external_event_id}/quote": {
+      "get": {
+        "summary": "Read the quote to show before the organizer pays",
+        "operationId": "getEventQuote",
+        "security": [
+          {
+            "PartnerBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "partner",
+            "in": "path",
+            "required": true,
+            "description": "Partner slug; the bearer key must be scoped to this same partner.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "external_event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The quote",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventQuote"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Requires bookings:read. Mounted. The quote for the organizer's event before they pay: every DJ still waiting for a payment hold (Confirm & Book, open, the organizer's own offer or a DJ's offer they accepted), each with the DJ fee, Gelatin's service fee and card processing, and the event total. Every figure is the current offer's stored one, the same the hold is placed for, so the quote and the charge can't differ; a line whose stored figures don't add up to the offer total is left out. The quote number changes whenever any line does. payment_steps say in plain words what happens to the money; cancellation_terms state Gelatin's partner cancellation policy as each cancellation applies it. Show it, with terms_url, before the organizer pays. Resolves the event only through the authenticated partner's own external_event_id; an unknown event and another partner's event both return the same 404. djs is empty, and valid_until null, when nothing waits for a hold."
+      }
+    },
     "/v1/partners/{partner}/events/{external_event_id}": {
       "patch": {
         "summary": "Send a monotonic event change or cancellation",
@@ -3623,7 +3689,7 @@
           "refund_cents": {
             "type": "integer",
             "minimum": 0,
-            "description": "What goes back to the organizer's card."
+            "description": "What is refunded to the organizer's card from a charge. Zero when nothing was charged: releasing a card hold is not a refund (see `hold_released`)."
           },
           "dj_keeps_cents": {
             "type": "integer",
@@ -3719,7 +3785,7 @@
           "refund_cents": {
             "type": "integer",
             "minimum": 0,
-            "description": "What goes back to the organizer's card."
+            "description": "What is refunded to the organizer's card from a charge. Zero when nothing was charged: releasing a card hold is not a refund (see `hold_released`)."
           },
           "dj_keeps_cents": {
             "type": "integer",
@@ -4228,6 +4294,203 @@
                 }
               }
             }
+          }
+        }
+      },
+      "EventQuoteLine": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "external_request_id",
+          "request_id",
+          "dj_id",
+          "dj_name",
+          "starts_at",
+          "ends_at",
+          "dj_fee_cents",
+          "service_fee_cents",
+          "processing_fee_cents",
+          "total_cents",
+          "charged",
+          "respond_by"
+        ],
+        "properties": {
+          "external_request_id": {
+            "type": "string",
+            "description": "Your DjRequest.external_request_id."
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "dj_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "dj_name": {
+            "type": "string"
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The DJ's set, or the whole event when no set was chosen."
+          },
+          "ends_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "dj_fee_cents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "service_fee_cents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "processing_fee_cents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total_cents": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Exactly what the hold for this DJ is for: the three fee lines added up."
+          },
+          "charged": {
+            "type": "string",
+            "enum": [
+              "dj_accepts",
+              "on_hold"
+            ],
+            "description": "dj_accepts: charged only if the DJ accepts. on_hold: the DJ already agreed, so it's charged once held."
+          },
+          "respond_by": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the DJ must answer by; an unanswered hold is released then."
+          }
+        }
+      },
+      "EventQuote": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "external_event_id",
+          "quote_number",
+          "issued_at",
+          "valid_until",
+          "currency",
+          "event",
+          "djs",
+          "dj_fee_cents",
+          "service_fee_cents",
+          "processing_fee_cents",
+          "total_cents",
+          "payment_steps",
+          "cancellation_terms",
+          "terms_url"
+        ],
+        "properties": {
+          "external_event_id": {
+            "type": "string"
+          },
+          "quote_number": {
+            "type": "string",
+            "pattern": "^GQ-[0-9A-F]{4}-[0-9A-F]{4}$",
+            "description": "The same lines always give the same number."
+          },
+          "issued_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "valid_until": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "The first DJ's answer deadline, or the first set's start if sooner; null when djs is empty."
+          },
+          "currency": {
+            "type": "string",
+            "example": "usd"
+          },
+          "event": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "venue_name",
+              "time_zone"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "venue_name": {
+                "type": "string"
+              },
+              "time_zone": {
+                "type": "string"
+              }
+            }
+          },
+          "djs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventQuoteLine"
+            }
+          },
+          "dj_fee_cents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "service_fee_cents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "processing_fee_cents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total_cents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "payment_steps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What happens to the money, in plain words, in order."
+          },
+          "cancellation_terms": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "code",
+                "when",
+                "text"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "when": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "terms_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Gelatin's Terms of Service, which the organizer agrees to with the quote."
           }
         }
       }
