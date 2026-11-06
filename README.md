@@ -31,7 +31,7 @@ Not using JavaScript? Every call is a plain HTTPS request with JSON, described i
 ## Install
 
 ```sh
-npm install github:gelatinbookings/gelatin-partner-sdk#v0.1.0-alpha.9
+npm install github:gelatinbookings/gelatin-partner-sdk#v0.1.0-alpha.10
 ```
 
 Requires Node.js 20 or later. The package builds itself on install.
