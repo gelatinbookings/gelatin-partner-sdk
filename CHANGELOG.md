@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.0-alpha.10
+
+Additive: every call and field from alpha.9 works as before, and no field was removed or changed type or value. One new call reads the quote to show before the organizer pays.
+
+### New
+
+- **`getEventQuote(eventId)`**: the quote to show before the organizer pays (`EventQuote`). For each DJ still waiting for a hold, it has the DJ fee, the service fee, card processing and the total. It also has the event total, a quote number and valid-until, the payment steps in plain words, the cancellation terms and `terms_url`. Its figures are the ones the hold uses, so show them rather than adding anything up. Needs `bookings:read`; an unknown event, or another partner's, is `404 not_found`.
+
+### Docs
+
+- `PartnerCancellation.refund_cents` is what is refunded from a charge, and zero when only a hold existed. A released hold is not a refund, so show it as released (`hold_released`), never as refunded. No behaviour change.
+
 ## 0.1.0-alpha.9
 
 Additive: every call and field from alpha.8 works as before, and no field was removed or changed type or value. Two new calls read one DJ's profile and calendar.

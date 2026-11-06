@@ -171,6 +171,18 @@ Listing DJs needs `catalog:read` either way, so one key with all four scopes cov
 
 The Next.js example's [`app/pay-button.tsx`](examples/nextjs/app/pay-button.tsx) is the working reference, with its server route in [`lib/handlers.ts`](examples/nextjs/lib/handlers.ts). [Paying on your page](#paying-on-your-page) has more detail.
 
+### Show the quote before they pay
+
+`getEventQuote(eventId)` returns what the organizer is about to authorize: each DJ still waiting for a hold, with the DJ fee, Gelatin's service fee, card processing and that DJ's total, the event total, a quote number and when it's valid until. It also says what happens to the money in plain words (`payment_steps`) and states Gelatin's cancellation terms (`cancellation_terms`, each with when it applies). Every figure is the stored offer's, the same one the hold is placed for, so show these numbers rather than adding anything up yourself. On a Full integration, show the quote, a link to `terms_url` and an "I agree" tick before you mount the checkout. Gelatin's own page (Light) shows the same quote and asks for the same agreement, and emails the organizer a copy.
+
+```ts
+const quote = await gelatin.getEventQuote("event_123");
+if (quote.djs.length === 0) return; // nothing waits for a hold
+render(quote.quote_number, quote.djs, quote.total_cents, quote.payment_steps, quote.cancellation_terms, quote.terms_url);
+```
+
+The quote number changes whenever any line does, so read it again if the organizer comes back later. Needs `bookings:read`; an unknown event, or another partner's, is `404 not_found`.
+
 ### Gotchas
 
 - **One DJ per payment session, unless saved cards are on for you.** With `resource: { kind: "request" }`, a booking with three DJs needs three checkouts. With saved cards on, [one checkout covers every DJ](#on-your-own-page-full). Stripe allows one embedded checkout on a page at a time, so call `checkout.destroy()` before mounting the next.

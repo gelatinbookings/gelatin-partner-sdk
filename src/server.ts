@@ -28,6 +28,7 @@ import type {
   GenreQuery,
   LineupStatus,
   OrganizerStanding,
+  EventQuote,
   PartnerDeal,
   PortalLaunchRequest,
   PortalLaunchResult,
@@ -305,6 +306,46 @@ function organizerStanding(value: unknown): OrganizerStanding {
 
 const CANCELLATION_BLOCKS = new Set(["event_started", "already_cancelled", "already_completed", "not_cancellable"] as const);
 const CANCELLATION_RULES = new Set(["free_before_acceptance", "full_refund_7_days", "half_2_to_7_days", "dj_keeps_fee_under_48_hours"] as const);
+
+function eventQuote(value: unknown): EventQuote {
+  const body = object(value);
+  const event = object(body.event);
+  return {
+    external_event_id: string(body.external_event_id),
+    quote_number: string(body.quote_number),
+    issued_at: string(body.issued_at),
+    valid_until: optionalString(body.valid_until),
+    currency: string(body.currency),
+    event: { name: string(event.name), venue_name: string(event.venue_name), time_zone: string(event.time_zone) },
+    djs: array(body.djs).map((item) => {
+      const row = object(item);
+      return {
+        external_request_id: string(row.external_request_id),
+        request_id: string(row.request_id),
+        dj_id: string(row.dj_id),
+        dj_name: string(row.dj_name),
+        starts_at: string(row.starts_at),
+        ends_at: string(row.ends_at),
+        dj_fee_cents: integer(row.dj_fee_cents),
+        service_fee_cents: integer(row.service_fee_cents),
+        processing_fee_cents: integer(row.processing_fee_cents),
+        total_cents: integer(row.total_cents),
+        charged: literal(row.charged, new Set(["dj_accepts", "on_hold"] as const)),
+        respond_by: string(row.respond_by),
+      };
+    }),
+    dj_fee_cents: integer(body.dj_fee_cents),
+    service_fee_cents: integer(body.service_fee_cents),
+    processing_fee_cents: integer(body.processing_fee_cents),
+    total_cents: integer(body.total_cents),
+    payment_steps: array(body.payment_steps).map(string),
+    cancellation_terms: array(body.cancellation_terms).map((item) => {
+      const term = object(item);
+      return { code: string(term.code), when: string(term.when), text: string(term.text) };
+    }),
+    terms_url: string(body.terms_url),
+  };
+}
 
 function cancellationPreview(value: unknown): CancellationPreview {
   const body = object(value);
@@ -876,6 +917,15 @@ export function createPartnerClient(options: PartnerClientOptions) {
      * a Deal). Pass the organizer's `externalUserId` to include their own record
      * on your platform, exactly as a booking request is checked.
      */
+    /**
+     * The quote for an event before the organizer pays: every DJ still waiting
+     * for a payment hold, each fee line and the total, what happens to the
+     * money and the cancellation terms. Show it before the organizer pays; its
+     * figures are the ones the hold uses.
+     */
+    async getEventQuote(eventId: string, options: ReadOptions = {}): Promise<EventQuote> {
+      return json(await request(`events/${externalId(eventId)}/quote`, "GET", undefined, options), eventQuote);
+    },
     async getOrganizerStanding(communityRef: string, options: ReadOptions & { externalUserId?: string } = {}): Promise<OrganizerStanding> {
       const { externalUserId, ...settings } = options;
       if (!communityRef || !communityRef.trim()) throw new TypeError("A community reference is required");

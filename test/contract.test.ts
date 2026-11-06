@@ -27,6 +27,7 @@ describe("public partner contract", () => {
       "/v1/partners/{partner}/events/{external_event_id}/dj-bookings",
       "/v1/partners/{partner}/events/{external_event_id}/dj-bookings/{request_id}/alternates",
       "/v1/partners/{partner}/events/{external_event_id}/lineup",
+      "/v1/partners/{partner}/events/{external_event_id}/quote",
       "/v1/partners/{partner}/launch-sessions",
       "/v1/partners/{partner}/organizers/{community_ref}/standing",
       "/v1/partners/{partner}/payment-sessions",
@@ -45,7 +46,7 @@ describe("public partner contract", () => {
         }
       }
     }
-    expect(ids.size).toBe(19);
+    expect(ids.size).toBe(20);
   });
 
   it("reads a community's standing pull-only, and refuses creates while it owes", () => {
@@ -116,6 +117,25 @@ describe("public partner contract", () => {
     }
     expect(Object.keys(detail.properties.reviews.items!.properties).sort()).toEqual(["date", "text", "venue_name"]);
     expect(Object.keys(schemas.DjAvailability.properties.days.items!.properties).sort()).toEqual(["date", "status"]);
+  });
+
+  it("reads the quote to show before the organizer pays under bookings:read, every figure required", () => {
+    type Operation = { operationId: string; description: string; parameters: Array<{ name: string; in: string }>; responses: Record<string, { content?: Record<string, { schema: { $ref: string } }> }> };
+    const quote = (spec.paths as Record<string, Record<string, Operation>>)["/v1/partners/{partner}/events/{external_event_id}/quote"].get;
+    expect(quote.operationId).toBe("getEventQuote");
+    expect(quote.description).toMatch(/^Requires bookings:read\. Mounted\./);
+    expect(quote.parameters.map((parameter) => `${parameter.in}:${parameter.name}`)).toEqual(["path:partner", "path:external_event_id"]);
+    expect(quote.responses["200"].content?.["application/json"].schema.$ref).toBe("#/components/schemas/EventQuote");
+    type Schema = { required: string[]; additionalProperties: boolean; properties: Record<string, unknown> };
+    const schemas = (spec.components as { schemas: Record<string, Schema> }).schemas;
+    for (const name of ["EventQuote", "EventQuoteLine"]) {
+      expect(schemas[name]!.additionalProperties).toBe(false);
+      expect([...schemas[name]!.required].sort()).toEqual(Object.keys(schemas[name]!.properties).sort());
+    }
+    expect(Object.keys(schemas.EventQuoteLine!.properties)).toEqual(expect.arrayContaining(["dj_fee_cents", "service_fee_cents", "processing_fee_cents", "total_cents"]));
+    for (const forbidden of ["email", "phone", "stripe", "payout", "engagement", "offer_id"]) {
+      expect(JSON.stringify([schemas.EventQuote, schemas.EventQuoteLine])).not.toContain(forbidden);
+    }
   });
 
   it("has no unresolved component references or bundled runtime dependencies", () => {
